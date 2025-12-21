@@ -14,6 +14,7 @@ We follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
 | Version               | Date       | Highlights                                              |
 | --------------------- | ---------- | ------------------------------------------------------- |
+| [v0.1.1](./v0.1.1.md) | 2024-12-21 | ⚡ Performance Optimization - 60% faster reviews        |
 | [v0.1.0](./v0.1.0.md) | 2024-12-21 | 🎉 Initial Release - MVP with Multi-Agent Review System |
 
 ## Quick Links

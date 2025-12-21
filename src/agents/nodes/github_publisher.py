@@ -11,6 +11,7 @@ async def run(state: GraphState) -> dict:
     ctx = state["context"]
     comments = state["final_comments"]
     summary = state["summary"]
+    log.info("GitHub publisher started", pr=ctx.pr_number, comments=len(comments))
 
     if not comments:
         log.info("No comments to publish", pr=ctx.pr_number)

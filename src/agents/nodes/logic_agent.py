@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import structlog
@@ -8,15 +9,21 @@ from ..state import GraphState, ReviewComment
 
 log = structlog.get_logger()
 
+MAX_CONCURRENT_CALLS = 5
+
 
 async def run(state: GraphState) -> dict:
     """Analyze code for logic errors and bugs."""
-    llm = get_llm()
-    comments = []
+    files_to_scan = [f for f in state["files"] if f.patch]
+    log.info("Logic agent started", files=len(files_to_scan))
 
-    for file in state["files"]:
+    llm = get_llm()
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
+
+    async def process_file(file) -> list[ReviewComment]:
+        """Process a single file for logic issues."""
         if not file.patch:
-            continue
+            return []
 
         prompt = PROMPT.format(
             filename=file.filename,
@@ -25,13 +32,15 @@ async def run(state: GraphState) -> dict:
         )
 
         try:
-            response = await llm.ainvoke(prompt)
+            async with semaphore:
+                response = await llm.ainvoke(prompt)
             findings = _parse_findings(response.content)
 
+            file_comments = []
             for f in findings:
                 if f.get("confidence", 0) < 0.7:
                     continue
-                comments.append(
+                file_comments.append(
                     ReviewComment(
                         file=file.filename,
                         line=f["line"],
@@ -43,8 +52,15 @@ async def run(state: GraphState) -> dict:
                         agent="logic",
                     )
                 )
+            return file_comments
         except Exception as e:
             log.error("Logic agent error", file=file.filename, error=str(e))
+            return []
+
+    tasks = [process_file(file) for file in state["files"]]
+    results = await asyncio.gather(*tasks)
+
+    comments = [comment for file_comments in results for comment in file_comments]
 
     log.info("Logic scan complete", findings=len(comments))
     return {"comments": comments}

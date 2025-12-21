@@ -59,6 +59,8 @@ LANGUAGE_MAP = {
 async def run(state: GraphState) -> dict:
     """Fetch PR files and extract relevant changes."""
     ctx = state["context"]
+    log.info("Context extractor started", pr=ctx.pr_number, repo=f"{ctx.owner}/{ctx.repo}")
+
     github = GitHubService(ctx.installation_id)
 
     raw_files = await github.get_pr_files(ctx.owner, ctx.repo, ctx.pr_number)

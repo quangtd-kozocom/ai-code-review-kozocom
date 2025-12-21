@@ -11,6 +11,7 @@ SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2, "suggestion": 3}
 async def run(state: GraphState) -> dict:
     """Aggregate, deduplicate, and limit comments."""
     comments = state["comments"]
+    log.info("Aggregator started", total_comments=len(comments))
 
     # Deduplicate by (file, line, category)
     seen = set()

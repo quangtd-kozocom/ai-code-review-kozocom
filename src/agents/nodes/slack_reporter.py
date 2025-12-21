@@ -11,6 +11,7 @@ async def run(state: GraphState) -> dict:
     ctx = state["context"]
     comments = state.get("final_comments", [])
     summary = state.get("summary", "")
+    log.info("Slack reporter started", pr=ctx.pr_number)
 
     # Count by severity
     critical = sum(1 for c in comments if c.severity == "critical")
