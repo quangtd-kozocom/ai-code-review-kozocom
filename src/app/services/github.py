@@ -99,3 +99,18 @@ class GitHubService:
             )
             resp.raise_for_status()
             return resp.json()["id"]
+
+    async def create_pr_comment(self, owner: str, repo: str, pr_number: int, body: str) -> int:
+        """Create an issue comment on a PR (not a review comment)."""
+        token = await self._get_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                },
+                json={"body": body},
+            )
+            resp.raise_for_status()
+            return resp.json()["id"]

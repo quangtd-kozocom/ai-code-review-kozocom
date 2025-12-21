@@ -56,5 +56,6 @@ class GraphState(TypedDict):
     summary: str
 
     # Output
+    acknowledge_comment_id: int | None  # Initial notification comment
     review_id: int | None
     errors: list[str]

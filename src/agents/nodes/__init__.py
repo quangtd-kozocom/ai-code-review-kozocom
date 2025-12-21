@@ -1,5 +1,6 @@
 # Agents Nodes Package
 from . import (
+    acknowledger,
     aggregator,
     context_extractor,
     github_publisher,
@@ -10,6 +11,7 @@ from . import (
 )
 
 __all__ = [
+    "acknowledger",
     "context_extractor",
     "security_agent",
     "style_agent",

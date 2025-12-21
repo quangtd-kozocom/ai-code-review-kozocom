@@ -1,6 +1,7 @@
 from langgraph.graph import END, StateGraph
 
 from .nodes import (
+    acknowledger,
     aggregator,
     context_extractor,
     github_publisher,
@@ -17,6 +18,7 @@ def create_graph() -> StateGraph:
     g = StateGraph(GraphState)
 
     # Nodes
+    g.add_node("acknowledge", acknowledger.run)
     g.add_node("extract", context_extractor.run)
     g.add_node("security", security_agent.run)
     g.add_node("style", style_agent.run)
@@ -26,7 +28,10 @@ def create_graph() -> StateGraph:
     g.add_node("notify", slack_reporter.run)
 
     # Flow
-    g.set_entry_point("extract")
+    g.set_entry_point("acknowledge")
+
+    # Acknowledge -> Extract
+    g.add_edge("acknowledge", "extract")
 
     # Parallel agents (fan-out)
     g.add_edge("extract", "security")

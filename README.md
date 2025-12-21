@@ -18,8 +18,9 @@
 | 🔐 **Multi-Agent Review**  | 3 specialized AI agents: Security, Style, and Logic analysis        |
 | 🔗 **GitHub Integration**  | Seamless integration via GitHub Apps with HMAC webhook validation   |
 | ⚡ **Async Processing**    | Background processing with Celery + Redis for scalability           |
+| 🔔 **Instant Feedback**    | Immediate PR comment when review starts - no more waiting blindly   |
 | 🧠 **Smart Aggregation**   | Deduplication, severity prioritization, and per-file comment limits |
-| 🔔 **Slack Notifications** | Optional notifications for completed reviews                        |
+| 💬 **Slack Notifications** | Optional notifications for completed reviews                        |
 | 📊 **Observability**       | Structured logging with Sentry integration                          |
 
 ---
@@ -44,6 +45,10 @@
 │                              CELERY WORKER (Background)                              │
 │                                                                                      │
 │  ┌──────────────┐                                                                    │
+│  │  Acknowledge │ ← Post "Review started" comment to PR                              │
+│  └──────┬───────┘                                                                    │
+│         │                                                                            │
+│  ┌──────▼───────┐                                                                    │
 │  │   Extract    │ ← Fetch PR files from GitHub API                                   │
 │  └──────┬───────┘                                                                    │
 │         │                                                                            │
@@ -108,6 +113,7 @@ src/
 │   └── main.py             # App entrypoint
 ├── agents/                 # LangGraph AI Layer
 │   ├── nodes/              # Agent implementations
+│   │   ├── acknowledger.py
 │   │   ├── security_agent.py
 │   │   ├── style_agent.py
 │   │   ├── logic_agent.py
