@@ -27,12 +27,18 @@ Analyze the NEW code (+ lines) for logic errors and potential bugs.
 - Missing break/continue statements
 - Incorrect comparison logic
 
+## Severity Levels (MUST use exactly one of these):
+- "critical": Definite bug that will cause failures
+- "warning": Potential issue that should be reviewed
+- "info": Logic observation, not necessarily a bug
+- "suggestion": Best practice recommendation
+
 ## Rules:
 1. Only report issues with confidence > 0.7
 2. Only analyze NEW code (+ lines)
 3. Be specific about the exact line number
 4. Return empty findings array if no issues
-5. Severity: "critical" for definite bugs, "warning" for potential issues
+5. Use ONLY the severity values listed above (critical/warning/info/suggestion)
 
 ## Output (JSON only, no markdown):
 {{"findings": [

@@ -32,7 +32,7 @@ def _create_llm(model: str | None, settings) -> BaseChatModel:
     """Create an LLM instance based on configuration."""
     # Default to OpenAI if available
     if settings.OPENAI_API_KEY:
-        model_name = model or "gpt-4o"
+        model_name = model or "gpt-5-mini-2025-08-07"
         log.info("Using OpenAI", model=model_name)
         return ChatOpenAI(
             model=model_name,

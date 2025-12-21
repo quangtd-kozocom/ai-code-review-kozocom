@@ -39,7 +39,13 @@ def review_pr(self, owner: str, repo: str, pr_number: int, installation_id: int)
         else:
             log.info("Review completed", review_id=result.get("review_id"))
 
-        return result
+        return {
+            "status": "completed",
+            "review_id": result.get("review_id"),
+            "comment_count": len(result.get("final_comments", [])),
+            "error_count": len(result.get("errors", [])),
+            "errors": result.get("errors", []),
+        }
 
     try:
         return asyncio.run(_run())

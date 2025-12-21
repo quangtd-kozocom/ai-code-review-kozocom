@@ -51,3 +51,4 @@ dmypy.json
 
 # Local dev
 .DS_Store
+.pids

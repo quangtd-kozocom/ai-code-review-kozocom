@@ -25,12 +25,19 @@ Analyze the NEW code (+ lines) for security vulnerabilities.
 - Insecure cryptography
 - Race conditions
 
+## Severity Levels (MUST use exactly one of these):
+- "critical": Definite security vulnerability that must be fixed immediately
+- "warning": Potential security issue that should be reviewed
+- "info": Security-related observation, not necessarily a vulnerability
+- "suggestion": Best practice recommendation for security improvement
+
 ## Rules:
 1. Only report issues with confidence > 0.7
 2. Only analyze NEW code (+ lines)
 3. Be specific about the exact line number
 4. Return empty findings array if no issues
 5. Don't report issues in removed code (- lines)
+6. Use ONLY the severity values listed above (critical/warning/info/suggestion)
 
 ## Output (JSON only, no markdown):
 {{"findings": [
