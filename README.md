@@ -138,7 +138,95 @@ src/
 - **GitHub App** credentials ([create one here](https://github.com/settings/apps))
 - **OpenAI** or **Anthropic** API key
 
-### Installation
+### 🔧 Step 1: Create a GitHub App
+
+1. Go to [GitHub Settings > Developer settings > GitHub Apps](https://github.com/settings/apps)
+
+2. Click **"New GitHub App"**
+
+3. Fill in the basic information:
+   | Field | Value |
+   |-------|-------|
+   | **GitHub App name** | `AI Code Reviewer` (or your preferred name) |
+   | **Homepage URL** | Your website or repo URL |
+   | **Webhook URL** | `https://your-domain.com/api/v1/webhooks/github` (update later with ngrok) |
+   | **Webhook secret** | Generate a secure random string |
+
+4. Set **Permissions**:
+
+   **Repository permissions:**
+   | Permission | Access |
+   |------------|--------|
+   | Contents | Read |
+   | Metadata | Read |
+   | Pull requests | Read & Write |
+
+   **Subscribe to events:**
+
+   - ✅ Pull request
+
+5. Click **"Create GitHub App"**
+
+6. After creation, note down:
+   - **App ID** (shown at the top)
+   - **Generate a private key** (download the `.pem` file)
+
+### 🔧 Step 2: Install the App on Your Repository
+
+1. Go to your GitHub App settings page
+
+2. Click **"Install App"** in the left sidebar
+
+3. Choose the account/organization
+
+4. Select repositories:
+
+   - **All repositories** - App will review all repos
+   - **Only select repositories** - Choose specific repos to review
+
+5. Click **"Install"**
+
+6. Note down the **Installation ID** from the URL:
+   ```
+   https://github.com/settings/installations/INSTALLATION_ID
+   ```
+
+### 🔧 Step 3: Configure Environment Variables
+
+Create `.env` file with your credentials:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+# GitHub App (from Step 1)
+GITHUB_APP_ID=123456
+GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+...your private key content...
+-----END RSA PRIVATE KEY-----"
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+
+# LLM (at least one required)
+OPENAI_API_KEY=sk-...
+# or
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Redis
+REDIS_URL=redis://localhost:6379
+# or Upstash: rediss://default:xxx@xxx.upstash.io:6379
+
+# Optional
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL=#pr-reviews
+SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx
+```
+
+> ⚠️ **Note**: For the private key, you can either paste the content directly (with `\n` for newlines) or use a file path.
+
+### 🔧 Step 4: Installation
 
 ```bash
 # Clone the repository
@@ -156,7 +244,7 @@ cp .env.example .env
 # Edit .env with your credentials (see Configuration section)
 ```
 
-### Running Locally
+### 🔧 Step 5: Run Locally
 
 ```bash
 # Terminal 1: Start the FastAPI server
@@ -168,7 +256,7 @@ make worker
 
 The API will be available at `http://localhost:8000`.
 
-### 🚀 Quick Start Scripts (Recommended)
+### 🔧 Step 6: Quick Start Scripts (Recommended)
 
 Use the convenient startup scripts for a better developer experience:
 
@@ -207,14 +295,42 @@ When using `--tmux`, you get:
 - **Easy navigation**: Use `Ctrl+B, ←/→` to switch between panes
 - **Detach/Attach**: Use `Ctrl+B, D` to detach, `tmux attach -t ai-reviewer` to reattach
 
-### Exposing to GitHub (using ngrok)
+### 🔧 Step 7: Expose to Internet (ngrok)
 
 ```bash
 # Expose local server to the internet
 ngrok http 8000
 
-# Configure the ngrok URL as your GitHub App webhook URL
-# Example: https://abc123.ngrok.io/api/v1/webhooks/github
+# Or use the start script with ngrok
+./scripts/start.sh --ngrok
+```
+
+### 🔧 Step 8: Update GitHub App Webhook URL
+
+1. Go to your [GitHub App settings](https://github.com/settings/apps)
+2. Click on your app name
+3. Update **Webhook URL** to your ngrok URL:
+   ```
+   https://your-ngrok-id.ngrok.io/api/v1/webhooks/github
+   ```
+4. Click **Save changes**
+
+> 💡 **Tip**: Use a static ngrok domain (paid feature) or update the URL each time you restart ngrok.
+
+### ✅ Step 9: Test the Setup
+
+1. Create or update a Pull Request on your installed repository
+2. Watch the terminal logs for incoming webhook
+3. AI agents will analyze the code and post comments on the PR
+
+```bash
+# Expected log output
+[INFO] Received webhook: pull_request.opened
+[INFO] Queued review task for PR #123
+[INFO] Running security agent...
+[INFO] Running style agent...
+[INFO] Running logic agent...
+[INFO] Posted review to GitHub
 ```
 
 ---
