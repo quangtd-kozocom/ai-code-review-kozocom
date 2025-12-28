@@ -1,9 +1,40 @@
+"""GitHub publisher node with CTA for on-demand commands."""
+
+from enum import StrEnum
+
 import structlog
 
 from ...app.services.github import GitHubService
-from ..state import GraphState
+from ..state import GraphState, ReviewComment
 
 log = structlog.get_logger()
+
+
+class Severity(StrEnum):
+    """Review comment severity levels."""
+
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+    SUGGESTION = "suggestion"
+
+
+# Emoji mapping for severity levels
+SEVERITY_EMOJI: dict[str, str] = {
+    Severity.CRITICAL: "🔴",
+    Severity.WARNING: "🟡",
+    Severity.INFO: "🔵",
+    Severity.SUGGESTION: "💡",
+}
+
+# CTA template for actionable issues
+CTA_TEMPLATE = """\
+
+---
+💬 **Commands:**
+- `@reviewer fix this` - Generate fix
+- `@reviewer explain` - Giải thích chi tiết
+"""
 
 
 async def run(state: GraphState) -> dict:
@@ -11,6 +42,7 @@ async def run(state: GraphState) -> dict:
     ctx = state["context"]
     comments = state["final_comments"]
     summary = state["summary"]
+
     log.info("GitHub publisher started", pr=ctx.pr_number, comments=len(comments))
 
     if not comments:
@@ -24,13 +56,13 @@ async def run(state: GraphState) -> dict:
         {
             "path": c.file,
             "line": c.line,
-            "body": _format_comment(c),
+            "body": format_comment(c),
         }
         for c in comments
     ]
 
-    # Determine review action
-    has_critical = any(c.severity == "critical" for c in comments)
+    # Determine review action based on severity
+    has_critical = any(c.severity == Severity.CRITICAL for c in comments)
     event = "REQUEST_CHANGES" if has_critical else "COMMENT"
 
     try:
@@ -44,15 +76,38 @@ async def run(state: GraphState) -> dict:
         )
         log.info("Review published", review_id=review_id, pr=ctx.pr_number)
         return {"review_id": review_id}
+
     except Exception as e:
-        log.error("Failed to publish review", error=str(e))
+        log.exception("Failed to publish review")
         return {"errors": [str(e)]}
 
 
-def _format_comment(c) -> str:
-    """Format a ReviewComment for GitHub."""
-    emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵", "suggestion": "💡"}
-    body = f"{emoji.get(c.severity, '•')} **{c.severity.upper()}** ({c.category})\n\n{c.message}"
-    if c.suggestion:
-        body += f"\n\n**Suggestion:** {c.suggestion}"
-    return body
+def format_comment(comment: ReviewComment) -> str:
+    """
+    Format a ReviewComment for GitHub with CTA.
+
+    Args:
+        comment: The review comment to format
+
+    Returns:
+        Formatted markdown string
+    """
+    emoji = SEVERITY_EMOJI.get(comment.severity, "•")
+    severity_upper = comment.severity.upper()
+
+    # Build comment body
+    parts = [
+        f"{emoji} **{severity_upper}** ({comment.category})",
+        "",
+        comment.message,
+    ]
+
+    # Add suggestion if present
+    if comment.suggestion:
+        parts.extend(["", f"**💡 Gợi ý:** {comment.suggestion}"])
+
+    # Add CTA for actionable issues
+    if comment.severity in (Severity.CRITICAL, Severity.WARNING):
+        parts.append(CTA_TEMPLATE)
+
+    return "\n".join(parts)
