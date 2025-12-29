@@ -1,10 +1,13 @@
-"""Fix command handler - generates code fixes for review comments."""
+"""Fix command handler - generates code fixes for review comments.
 
-import json
+Uses LangChain structured output for reliable fix generation.
+"""
 
 import structlog
 from httpx import HTTPStatusError
 
+from ...agents.models import FixResult
+from ...core.llm import get_structured_llm
 from ..context import CommandContext
 from ..prompts import FIX_PROMPT
 from ..responses import (
@@ -23,6 +26,18 @@ class FixCommandHandler(BaseCommandHandler):
     """Generate code fix for a review comment issue."""
 
     async def execute(self, ctx: CommandContext) -> str:
+        """
+        Execute the fix command.
+
+        Fetches the parent review comment, gets code context,
+        and uses LLM to generate a fix suggestion.
+
+        Args:
+            ctx: Command context with PR and comment details.
+
+        Returns:
+            Response message with the fix or error.
+        """
         if not ctx.requires_parent_comment:
             return ERROR_NO_PARENT_COMMENT
 
@@ -43,40 +58,25 @@ class FixCommandHandler(BaseCommandHandler):
             if not code_context:
                 return ERROR_CANNOT_READ_FILE
 
-            # Generate fix using LLM
+            # Generate fix using structured LLM
             prompt = FIX_PROMPT.format(
                 issue_description=issue_description,
                 file_path=file_path,
                 line=line,
                 code_context=code_context,
             )
-            response = await self.llm.ainvoke(prompt)
-            fix_data = self._parse_json_response(response.content)
 
-            if not fix_data or "fixed_code" not in fix_data:
-                log.warning("Failed to parse fix response", response=response.content[:200])
-                return ERROR_CANNOT_GENERATE_FIX
+            structured_llm = get_structured_llm(FixResult)
+            result: FixResult = await structured_llm.ainvoke(prompt)
 
             return FIX_SUCCESS.format(
-                fixed_code=fix_data["fixed_code"],
-                explanation=fix_data.get("explanation", ""),
+                fixed_code=result.fixed_code,
+                explanation=result.explanation,
             )
 
         except HTTPStatusError as e:
             log.error("GitHub API error", status=e.response.status_code)
             return f"❌ GitHub API error: {e.response.status_code}"
-        except Exception as e:
+        except Exception:
             log.exception("Fix generation failed")
-            return f"❌ Lỗi khi generate fix: {e}"
-
-    @staticmethod
-    def _parse_json_response(content: str) -> dict | None:
-        """Extract and parse JSON from LLM response."""
-        try:
-            start = content.find("{")
-            end = content.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(content[start:end])
-        except json.JSONDecodeError:
-            pass
-        return None
+            return ERROR_CANNOT_GENERATE_FIX

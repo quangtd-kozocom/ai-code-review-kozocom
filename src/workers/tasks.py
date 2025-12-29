@@ -7,7 +7,6 @@ import structlog
 from ..agents.graph import graph
 from ..agents.state import PRContext
 from ..app.services.github import GitHubService
-from ..chat.commands import CommandType
 from ..chat.context import CommandContext
 from ..chat.handler import CommandHandler
 from ..chat.parser import parse_command

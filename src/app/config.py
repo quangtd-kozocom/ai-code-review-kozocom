@@ -9,13 +9,16 @@ class Settings(BaseSettings):
     # App
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
+    APP_URL: str | None = None
 
     # GitHub
     GITHUB_APP_ID: int
     GITHUB_PRIVATE_KEY: str
     GITHUB_WEBHOOK_SECRET: str
 
-    # LLM
+    OPENROUTER_API_KEY: str | None = None
+    OPENROUTER_DEFAULT_MODEL: str = "xiaomi/mimo-v2-flash:free"
+
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
 
