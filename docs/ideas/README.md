@@ -2,91 +2,123 @@
 
 > Tổng hợp các ý tưởng tính năng mới cho hệ thống AI Code Review, dựa trên nghiên cứu về CodeRabbit và các công cụ hàng đầu 2025.
 
-**Nghiên cứu ngày:** 28/12/2025  
-**Nguồn tham khảo:** CodeRabbit, Qodo, Sourcery, Codacy, Greptile, và các công cụ AI code review 2025
+**Cập nhật ngày:** 28/12/2025  
+**Nguồn tham khảo:** CodeRabbit, Qodo, Sourcery, Codacy, Greptile
 
 ---
 
 ## 📋 Tổng Quan
 
-Sau khi hoàn thành **Phase 1 MVP** với các tính năng core:
+### ✅ Đã Hoàn Thành (Phase 1 MVP + Phase 2)
 
-- ✅ Webhook receiver + HMAC validation
-- ✅ Multi-agent workflow (Security, Style, Logic)
-- ✅ GitHub API integration (fetch diff, post review)
-- ✅ Slack notification
-- ✅ Logging (structlog + Sentry)
-
-Dưới đây là các ý tưởng mở rộng được ưu tiên theo giá trị và độ phức tạp.
-
----
-
-## 🎯 Danh Sách Ý Tưởng
-
-| #   | Tên Tính Năng                   | Độ Ưu Tiên    | Độ Phức Tạp | File Chi Tiết                                          |
-| --- | ------------------------------- | ------------- | ----------- | ------------------------------------------------------ |
-| 1   | **Auto-Fix Suggestions**        | 🔴 Cao        | Trung bình  | [auto_fix_suggestions.md](./auto_fix_suggestions.md)   |
-| 2   | **Unit Test Generation**        | 🔴 Cao        | Cao         | [test_generation_agent.md](./test_generation_agent.md) |
-| 3   | **Interactive PR Chat**         | 🟡 Trung bình | Trung bình  | [interactive_chat.md](./interactive_chat.md)           |
-| 4   | **Sequence Diagram Generation** | 🟡 Trung bình | Thấp        | [diagram_generation.md](./diagram_generation.md)       |
-| 5   | **MCP Server Integration**      | 🟡 Trung bình | Cao         | [mcp_integration.md](./mcp_integration.md)             |
-| 6   | **CLI Tool**                    | 🟢 Thấp       | Trung bình  | [cli_tool.md](./cli_tool.md)                           |
-| 7   | **Learning & Feedback System**  | 🟡 Trung bình | Cao         | [learning_system.md](./learning_system.md)             |
-| 8   | **Multi-Model Review**          | 🟢 Thấp       | Trung bình  | [multi_model_review.md](./multi_model_review.md)       |
+| Tính Năng                    | Mô Tả                                   | Status  |
+| ---------------------------- | --------------------------------------- | ------- |
+| Webhook + HMAC               | Nhận và xác thực GitHub webhooks        | ✅ Done |
+| Multi-agent Review           | Security, Style, Logic agents           | ✅ Done |
+| GitHub Integration           | Fetch diff, post review comments        | ✅ Done |
+| Slack Notification           | Thông báo kết quả review                | ✅ Done |
+| Logging (structlog + Sentry) | Structured logging và error tracking    | ✅ Done |
+| **Interactive PR Chat**      | `@reviewer` commands in PR              | ✅ Done |
+| **On-demand Fix**            | `@reviewer fix` - Generate code fixes   | ✅ Done |
+| **On-demand Tests**          | `@reviewer tests` - Generate unit tests | ✅ Done |
+| **Explain Issues**           | `@reviewer explain` - Chi tiết issues   | ✅ Done |
 
 ---
 
-## 🏆 Top 3 Ý Tưởng Ưu Tiên
+## 🎯 Roadmap Tính Năng Mới
 
-### 1. 🔧 Auto-Fix Suggestions (One-Click Fix)
+### 🔴 Priority Cao - Q1 2025
 
-**Giá trị:** Cực kỳ cao - Đây là tính năng signature của CodeRabbit 2025  
-**Mô tả:** Không chỉ phát hiện vấn đề mà còn tự động tạo patch sửa lỗi, cho phép developer apply fix trực tiếp từ PR comment.
+| #   | Tên Tính Năng           | Độ Phức Tạp | File Chi Tiết                                      |
+| --- | ----------------------- | ----------- | -------------------------------------------------- |
+| 1   | **Generate Docstrings** | Thấp        | [generate_docstrings.md](./generate_docstrings.md) |
+| 2   | **Re-review Command**   | Thấp        | [re_review.md](./re_review.md)                     |
+| 3   | **Summarize PR**        | Thấp        | [summarize_pr.md](./summarize_pr.md)               |
+| 4   | **Sequence Diagrams**   | Thấp        | [diagram_generation.md](./diagram_generation.md)   |
 
-### 2. 🧪 Unit Test Generation Agent
+### 🟡 Priority Trung Bình - Q2 2025
 
-**Giá trị:** Rất cao - Trend lớn nhất 2025 trong AI dev tools  
-**Mô tả:** Agent chuyên biệt tự động generate unit tests cho code mới, đảm bảo coverage cho edge cases.
+| #   | Tên Tính Năng            | Độ Phức Tạp | File Chi Tiết                                |
+| --- | ------------------------ | ----------- | -------------------------------------------- |
+| 5   | **Configuration File**   | Trung bình  | [config_file.md](./config_file.md)           |
+| 6   | **Pause/Resume Reviews** | Thấp        | [pause_resume.md](./pause_resume.md)         |
+| 7   | **Resolve Comments**     | Thấp        | [resolve_comments.md](./resolve_comments.md) |
+| 8   | **Learning System**      | Cao         | [learning_system.md](./learning_system.md)   |
 
-### 3. 💬 Interactive PR Chat
+### 🟢 Priority Thấp - Q3-Q4 2025
 
-**Giá trị:** Cao - UX improvement đáng kể  
-**Mô tả:** Cho phép developer chat trực tiếp với AI bot trong PR để hỏi thêm, yêu cầu giải thích, hoặc ra lệnh generate tests/docs.
+| #   | Tên Tính Năng          | Độ Phức Tạp | File Chi Tiết                                    |
+| --- | ---------------------- | ----------- | ------------------------------------------------ |
+| 9   | **MCP Integration**    | Cao         | [mcp_integration.md](./mcp_integration.md)       |
+| 10  | **CLI Tool**           | Trung bình  | [cli_tool.md](./cli_tool.md)                     |
+| 11  | **Multi-Model Review** | Trung bình  | [multi_model_review.md](./multi_model_review.md) |
 
 ---
 
 ## 📊 Ma Trận Đánh Giá
 
 ```
-Độ phức tạp →
-     Thấp          Trung bình         Cao
-┌─────────────┬─────────────────┬─────────────────┐
-│  Sequence   │   Auto-Fix      │   Test Gen      │ Cao
-│  Diagrams   │   CLI Tool      │   MCP Server    │
-│  ★★★★☆     │   ★★★★★         │   Learning      │
-├─────────────┼─────────────────┼─────────────────┤ Giá trị
-│             │   Interactive   │                 │ ↓
-│             │   Chat          │                 │ Trung
-│             │   Multi-Model   │                 │ bình
-└─────────────┴─────────────────┴─────────────────┘
+                    Độ phức tạp →
+              Thấp          Trung bình         Cao
+        ┌─────────────┬─────────────────┬─────────────────┐
+   Cao  │  Docstrings │   Config File   │   Learning      │
+        │  Re-review  │                 │   System        │
+        │  Summarize  │                 │   MCP Server    │
+        │  Diagrams   │                 │                 │
+  Giá   ├─────────────┼─────────────────┼─────────────────┤
+  trị   │  Pause/     │   CLI Tool      │                 │
+   ↓    │  Resume     │   Multi-Model   │                 │
+  Thấp  │  Resolve    │                 │                 │
+        └─────────────┴─────────────────┴─────────────────┘
 ```
+
+---
+
+## 🏆 Top 3 Ý Tưởng Ưu Tiên Tiếp Theo
+
+### 1. 📝 Generate Docstrings
+
+**Giá trị:** Cao - Tự động hóa documentation  
+**Command:** `@reviewer docstrings`  
+**Mô tả:** Generate docstrings cho functions/classes trong PR, follow team conventions.
+
+### 2. 🔄 Re-review Command
+
+**Giá trị:** Cao - Essential workflow feature  
+**Command:** `@reviewer re-review`  
+**Mô tả:** Trigger lại review sau khi developer sửa code theo suggestions.
+
+### 3. 📋 Summarize PR
+
+**Giá trị:** Cao - Giúp reviewers nhanh chóng hiểu PR  
+**Command:** `@reviewer summarize`  
+**Mô tả:** Tóm tắt tất cả changes, purpose, và impact của PR.
+
+---
+
+## 📁 Archived Features (Đã Implement)
+
+Các features đã được implement và move vào production:
+
+- ~~Auto-Fix Suggestions~~ → Implemented as `@reviewer fix`
+- ~~Interactive PR Chat~~ → Implemented in `src/chat/`
+- ~~Unit Test Generation~~ → Implemented as `@reviewer tests`
 
 ---
 
 ## 🔗 Tài Liệu Tham Khảo
 
-- [CodeRabbit Features 2025](https://coderabbit.ai)
-- [Qodo Agentic Platform](https://qodo.ai)
+- [CodeRabbit Commands](https://docs.coderabbit.ai/guides/commands)
+- [CodeRabbit Docstrings](https://docs.coderabbit.ai/finishing-touches/docstrings)
 - [Model Context Protocol (MCP)](https://modelcontextprotocol.io)
-- [AI Code Review Trends 2025](https://devtoolsacademy.com)
 
 ---
 
-## 📅 Lộ Trình Đề Xuất
+## 📅 Implementation Timeline
 
 ```
-Q1 2025: Auto-Fix Suggestions + Sequence Diagrams
-Q2 2025: Test Generation Agent + Interactive Chat
-Q3 2025: MCP Integration + Learning System
-Q4 2025: CLI Tool + Multi-Model Review
+Week 1-2:  Generate Docstrings + Re-review Command
+Week 3-4:  Summarize PR + Sequence Diagrams
+Week 5-6:  Configuration File + Pause/Resume
+Week 7-8:  Resolve Comments + Learning System basics
 ```
