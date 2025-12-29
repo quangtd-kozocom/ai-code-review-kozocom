@@ -1,45 +1,26 @@
-"""Base command handler and shared constants."""
+"""Base command handler and shared constants.
+
+Constants are imported from core.constants for centralized management.
+"""
 
 from abc import ABC, abstractmethod
 
 from ...app.services.github import GitHubService
+from ...core.constants import (
+    LANGUAGE_MAP,
+    SKIP_PATTERNS,
+    get_language_from_path,
+)
 from ...core.llm import get_llm
 from ..context import CommandContext
 
-# File extension to language mapping
-LANGUAGE_MAP: dict[str, str] = {
-    ".py": "python",
-    ".js": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".jsx": "javascript",
-    ".java": "java",
-    ".go": "go",
-    ".rs": "rust",
-    ".rb": "ruby",
-    ".php": "php",
-}
-
-# Patterns to skip for test generation
-SKIP_PATTERNS: frozenset[str] = frozenset(
-    {
-        "test_",
-        "_test.",
-        ".test.",
-        "tests/",
-        "__init__",
-        "config",
-        "migration",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".md",
-        ".txt",
-        ".lock",
-        "package-lock",
-        "yarn.lock",
-    }
-)
+# Re-export for backward compatibility (other modules import from here)
+__all__ = [
+    "LANGUAGE_MAP",
+    "SKIP_PATTERNS",
+    "get_language_from_path",
+    "BaseCommandHandler",
+]
 
 
 class BaseCommandHandler(ABC):

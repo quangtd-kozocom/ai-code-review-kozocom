@@ -17,7 +17,7 @@ from ..responses import (
     ERROR_NO_PARENT_COMMENT,
     FIX_SUCCESS,
 )
-from .base import BaseCommandHandler
+from .base import BaseCommandHandler, get_language_from_path
 
 log = structlog.get_logger()
 
@@ -59,10 +59,12 @@ class FixCommandHandler(BaseCommandHandler):
                 return ERROR_CANNOT_READ_FILE
 
             # Generate fix using structured LLM
+            language = get_language_from_path(file_path)
             prompt = FIX_PROMPT.format(
                 issue_description=issue_description,
                 file_path=file_path,
                 line=line,
+                language=language,
                 code_context=code_context,
             )
 

@@ -1,7 +1,5 @@
 """Explain command handler - provides detailed explanations for code issues."""
 
-from pathlib import Path
-
 import structlog
 
 from ..context import CommandContext
@@ -11,7 +9,7 @@ from ..responses import (
     ERROR_NO_PARENT_COMMENT,
     EXPLAIN_SUCCESS,
 )
-from .base import LANGUAGE_MAP, BaseCommandHandler
+from .base import BaseCommandHandler, get_language_from_path
 
 log = structlog.get_logger()
 
@@ -31,7 +29,7 @@ class ExplainCommandHandler(BaseCommandHandler):
             file_path = parent.get("path", "")
             line = parent.get("line") or parent.get("original_line", 0)
             issue_description = parent.get("body", "")
-            language = self._detect_language(file_path)
+            language = get_language_from_path(file_path)
 
             code_context = await self.github.get_file_content_at_pr(
                 ctx.owner, ctx.repo, ctx.pr_number, file_path, line, context_lines=10
@@ -51,9 +49,3 @@ class ExplainCommandHandler(BaseCommandHandler):
         except Exception as e:
             log.exception("Explain generation failed")
             return f"❌ Lỗi: {e}"
-
-    @staticmethod
-    def _detect_language(filename: str) -> str:
-        """Detect programming language from file extension."""
-        ext = Path(filename).suffix.lower()
-        return LANGUAGE_MAP.get(ext, "text")
