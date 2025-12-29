@@ -27,15 +27,6 @@ SEVERITY_EMOJI: dict[str, str] = {
     Severity.SUGGESTION: "💡",
 }
 
-# CTA template for actionable issues
-CTA_TEMPLATE = """\
-
----
-💬 **Commands:**
-- `@reviewer fix this` - Generate fix
-- `@reviewer explain` - Giải thích chi tiết
-"""
-
 
 async def run(state: GraphState) -> dict:
     """Post review to GitHub."""
@@ -84,7 +75,7 @@ async def run(state: GraphState) -> dict:
 
 def format_comment(comment: ReviewComment) -> str:
     """
-    Format a ReviewComment for GitHub with CTA.
+    Format a ReviewComment for GitHub.
 
     Args:
         comment: The review comment to format
@@ -105,9 +96,5 @@ def format_comment(comment: ReviewComment) -> str:
     # Add suggestion if present
     if comment.suggestion:
         parts.extend(["", f"**💡 Gợi ý:** {comment.suggestion}"])
-
-    # Add CTA for actionable issues
-    if comment.severity in (Severity.CRITICAL, Severity.WARNING):
-        parts.append(CTA_TEMPLATE)
 
     return "\n".join(parts)
