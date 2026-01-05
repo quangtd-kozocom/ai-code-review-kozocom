@@ -3,6 +3,8 @@ from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from ..core.config import ReviewerConfig
+
 
 class FileChange(BaseModel):
     """A file changed in the PR."""
@@ -37,6 +39,8 @@ class PRContext(BaseModel):
     title: str
     author: str
     installation_id: int
+    base_branch: str = "main"
+    is_draft: bool = False
 
 
 class GraphState(TypedDict):
@@ -44,6 +48,9 @@ class GraphState(TypedDict):
 
     # Input
     context: PRContext
+
+    # Configuration - per-repository settings
+    repo_config: ReviewerConfig
 
     # Extracted
     files: list[FileChange]

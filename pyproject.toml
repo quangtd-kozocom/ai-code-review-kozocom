@@ -23,7 +23,14 @@ dependencies = [
 
     # Background Tasks
     "celery[redis]>=5.4.0",
-    "redis>=5.2.0",
+    "redis[hiredis]>=5.2.0",
+
+    # Database - SQLModel (ORM)
+    "sqlmodel>=0.0.22",
+    "asyncpg>=0.30.0",
+
+    # YAML parsing
+    "pyyaml>=6.0.2",
 
     # Slack
     "slack-sdk>=3.33.0",

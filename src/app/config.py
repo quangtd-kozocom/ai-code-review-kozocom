@@ -22,8 +22,17 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
 
-    # Redis
+    # Redis (Celery)
     REDIS_URL: str
+
+    # Database - Neon PostgreSQL
+    DATABASE_URL: str | None = None
+
+    # Cache - Upstash Redis
+    UPSTASH_REDIS_URL: str | None = None
+
+    # Config System
+    CONFIG_CACHE_TTL: int = 300  # 5 minutes
 
     # Slack
     SLACK_BOT_TOKEN: str | None = None
@@ -32,7 +41,11 @@ class Settings(BaseSettings):
     # Sentry
     SENTRY_DSN: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 @lru_cache

@@ -295,3 +295,41 @@ class GitHubService:
             reply_id = resp.json()["id"]
             log.info("Review comment reply created", reply_id=reply_id)
             return reply_id
+
+    async def get_file_raw(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        ref: str = "HEAD",
+    ) -> str | None:
+        """
+        Get raw file content from repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            path: File path in the repository
+            ref: Git reference (branch/commit/tag), defaults to HEAD
+
+        Returns:
+            File content as string, or None if not found
+        """
+        token = await self._get_token()
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{path}",
+                headers={
+                    **self._headers(token),
+                    "Accept": "application/vnd.github.raw+json",
+                },
+                params={"ref": ref},
+            )
+
+            if resp.status_code == 404:
+                log.debug("File not found", path=path, ref=ref)
+                return None
+
+            resp.raise_for_status()
+            return resp.text
