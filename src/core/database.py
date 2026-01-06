@@ -6,8 +6,9 @@ Provides async session management and lifecycle hooks.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..app.config import get_settings
+from .constants import DEFAULT_DB_MAX_OVERFLOW, DEFAULT_DB_POOL_SIZE
 
 log = structlog.get_logger()
 
@@ -64,8 +66,8 @@ def get_engine() -> AsyncEngine:
         _engine = create_async_engine(
             db_url,
             echo=settings.DEBUG,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=DEFAULT_DB_POOL_SIZE,
+            max_overflow=DEFAULT_DB_MAX_OVERFLOW,
             pool_pre_ping=True,
         )
         log.info("Database engine created")
@@ -88,7 +90,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_session() -> AsyncGenerator[AsyncSession]:
     """
     Get database session as async context manager.
 

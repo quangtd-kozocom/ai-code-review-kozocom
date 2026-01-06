@@ -7,7 +7,7 @@ Same model works for DB operations AND validation.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Column, UniqueConstraint
@@ -17,7 +17,7 @@ from sqlmodel import Field, SQLModel
 
 def _utcnow() -> datetime:
     """Get current UTC timestamp."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ConfigBase(SQLModel):
@@ -35,9 +35,7 @@ class ConfigModel(ConfigBase, table=True):
     """
 
     __tablename__ = "configs"
-    __table_args__ = (
-        UniqueConstraint("owner", "repo", name="uq_configs_owner_repo"),
-    )
+    __table_args__ = (UniqueConstraint("owner", "repo", name="uq_configs_owner_repo"),)
 
     # Primary key
     id: int | None = Field(default=None, primary_key=True)

@@ -5,6 +5,8 @@ Constants are imported from core.constants for centralized management.
 
 from abc import ABC, abstractmethod
 
+from langchain_core.language_models.chat_models import BaseChatModel
+
 from ...app.services.github import GitHubService
 from ...core.constants import (
     LANGUAGE_MAP,
@@ -26,7 +28,10 @@ __all__ = [
 class BaseCommandHandler(ABC):
     """Abstract base class for command handlers."""
 
-    def __init__(self, github: GitHubService):
+    github: GitHubService
+    llm: BaseChatModel
+
+    def __init__(self, github: GitHubService) -> None:
         self.github = github
         self.llm = get_llm()
 

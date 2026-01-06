@@ -5,6 +5,13 @@ from pydantic import BaseModel, Field
 
 from ..core.config import ReviewerConfig
 
+__all__ = [
+    "FileChange",
+    "ReviewComment",
+    "PRContext",
+    "GraphState",
+]
+
 
 class FileChange(BaseModel):
     """A file changed in the PR."""

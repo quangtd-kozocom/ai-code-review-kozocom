@@ -246,18 +246,6 @@ async def create_config_service(
         except Exception as e:
             log.warning("Failed to setup config cache", error=str(e))
 
-    # Setup repository if configured
-    if with_database:
-        try:
-            from ..database import get_session, is_db_configured
-
-            if is_db_configured():
-                # Note: Session management happens in the caller context
-                # Repository needs to be created with an active session
-                log.debug("Config database enabled")
-        except Exception as e:
-            log.warning("Failed to setup config database", error=str(e))
-
     return ConfigService(
         github=github,
         cache=cache,

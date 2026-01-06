@@ -4,8 +4,8 @@ Configuration module.
 Provides repository-level configuration for AI reviewer behavior.
 
 Usage:
-    from src.core.config import ConfigService, ReviewerConfig
-    from src.core.config import create_config_service
+    from .config import ConfigService, ReviewerConfig
+    from .config import create_config_service
 
     # Create service
     service = await create_config_service(github)

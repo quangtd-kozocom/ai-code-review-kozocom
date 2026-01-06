@@ -6,7 +6,7 @@ Provides database operations for config storage.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -113,7 +113,7 @@ class ConfigRepository:
         if existing:
             # Update
             existing.config_data = config_data
-            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_at = datetime.now(UTC)
             self.session.add(existing)
             await self.session.flush()
             log.info("Config updated", owner=owner, repo=repo)

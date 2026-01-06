@@ -10,7 +10,7 @@ Responsible for:
 import structlog
 
 from ...app.services.github import GitHubService
-from ...core.config import ReviewerConfig, create_config_service
+from ...core.config import create_config_service
 from ...core.constants import get_language_or_none
 from ..state import FileChange, GraphState
 
@@ -105,8 +105,3 @@ async def run(state: GraphState) -> dict:
         "files": files,
         "repo_config": config,
     }
-
-
-def _get_default_config() -> ReviewerConfig:
-    """Get default config for fallback."""
-    return ReviewerConfig()

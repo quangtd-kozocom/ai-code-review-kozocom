@@ -3,6 +3,7 @@ import ssl
 from celery import Celery
 
 from ..app.config import get_settings
+from ..core.constants import CELERY_TASK_SOFT_TIME_LIMIT, CELERY_TASK_TIME_LIMIT
 
 settings = get_settings()
 
@@ -25,8 +26,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     task_track_started=True,
-    task_time_limit=300,
-    task_soft_time_limit=280,
+    task_time_limit=CELERY_TASK_TIME_LIMIT,
+    task_soft_time_limit=CELERY_TASK_SOFT_TIME_LIMIT,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
 )

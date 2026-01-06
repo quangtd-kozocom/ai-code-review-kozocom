@@ -4,6 +4,7 @@ from pathlib import Path
 
 import structlog
 
+from ...core.constants import MAX_FILES_FOR_TEST_GENERATION
 from ..context import CommandContext
 from ..prompts import GENERATE_TESTS_PROMPT
 from ..responses import ERROR_NO_FILES_FOUND, ERROR_NO_MATCHING_FILES, TESTS_SUCCESS
@@ -14,8 +15,6 @@ log = structlog.get_logger()
 
 class GenerateTestsCommandHandler(BaseCommandHandler):
     """Generate unit tests for PR changes."""
-
-    MAX_FILES = 3  # Limit files to avoid token limits
 
     async def execute(self, ctx: CommandContext) -> str:
         try:
@@ -39,7 +38,7 @@ class GenerateTestsCommandHandler(BaseCommandHandler):
                 return ERROR_NO_MATCHING_FILES.format(target_info=target_info)
 
             # Limit files and format diff
-            testable_files = testable_files[: self.MAX_FILES]
+            testable_files = testable_files[:MAX_FILES_FOR_TEST_GENERATION]
             pr_diff = self._format_diff(testable_files)
 
             prompt = GENERATE_TESTS_PROMPT.format(

@@ -9,12 +9,18 @@ These are pure Pydantic models for:
 
 from __future__ import annotations
 
-import fnmatch
 import re
 from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# ═══════════════════════════════════════════════════════════
+# GLOB TO REGEX CONSTANTS (module-level to avoid Pydantic conflicts)
+# ═══════════════════════════════════════════════════════════
+_GLOB_START_PLACEHOLDER = "\x00START\x00"
+_GLOB_END_PLACEHOLDER = "\x00END\x00"
+_GLOB_DOUBLE_STAR_PLACEHOLDER = "\x00DS\x00"
 
 
 class ReviewProfile(StrEnum):
@@ -193,6 +199,109 @@ class ReviewerConfig(BaseModel):
             return self.reviews.max_comments_per_file
         return profile_limits.get(self.reviews.profile, 10)
 
+    # ═══════════════════════════════════════════════════════════
+    # GLOB TO REGEX HELPERS
+    # ═══════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _handle_boundary_patterns(pattern: str) -> str:
+        """
+        Handle special ** patterns at boundaries.
+
+        Converts:
+        - **/ at start → placeholder for "any prefix or no prefix"
+        - /** at end → placeholder for "any suffix or no suffix"
+
+        Args:
+            pattern: Glob pattern string.
+
+        Returns:
+            Pattern with boundary ** replaced by placeholders.
+        """
+        # **/ at start: optional prefix
+        if pattern.startswith("**/"):
+            pattern = _GLOB_START_PLACEHOLDER + pattern[3:]
+        # /** at end: optional suffix
+        if pattern.endswith("/**"):
+            pattern = pattern[:-3] + _GLOB_END_PLACEHOLDER
+        return pattern
+
+    @staticmethod
+    def _protect_double_stars(pattern: str) -> str:
+        """
+        Replace ** with placeholder to prevent processing as single *.
+
+        Args:
+            pattern: Glob pattern (after boundary handling).
+
+        Returns:
+            Pattern with ** replaced by placeholder.
+        """
+        return pattern.replace("**", _GLOB_DOUBLE_STAR_PLACEHOLDER)
+
+    @staticmethod
+    def _convert_glob_char(char: str) -> str:
+        """
+        Convert a single glob character to its regex equivalent.
+
+        Args:
+            char: Single character from glob pattern.
+
+        Returns:
+            Regex equivalent string.
+        """
+        if char == "*":
+            return "[^/]*"  # Match anything except /
+        elif char == "?":
+            return "[^/]"  # Match single char except /
+        elif char in ".^$+{}[]|()":
+            return "\\" + char  # Escape regex special chars
+        elif char == "\\":
+            return "\\\\"  # Escape backslash
+        else:
+            return char
+
+    @staticmethod
+    def _convert_placeholders_and_chars(pattern: str) -> str:
+        """
+        Convert placeholders and glob characters to regex.
+
+        Processes the pattern character by character, handling:
+        - START placeholder → (.*/)?
+        - END placeholder → (/.*)?
+        - DOUBLE_STAR placeholder → .*
+        - Single glob characters via _convert_glob_char
+
+        Args:
+            pattern: Prepared pattern with placeholders.
+
+        Returns:
+            Regex pattern string.
+        """
+        result: list[str] = []
+        i = 0
+
+        while i < len(pattern):
+            # Check for placeholders first
+            if pattern[i:].startswith(_GLOB_START_PLACEHOLDER):
+                result.append("(.*/)?")  # Optional prefix with /
+                i += len(_GLOB_START_PLACEHOLDER)
+                continue
+            if pattern[i:].startswith(_GLOB_END_PLACEHOLDER):
+                result.append("(/.*)?")  # Optional suffix with /
+                i += len(_GLOB_END_PLACEHOLDER)
+                continue
+            if pattern[i:].startswith(_GLOB_DOUBLE_STAR_PLACEHOLDER):
+                result.append(".*")  # Match anything including /
+                i += len(_GLOB_DOUBLE_STAR_PLACEHOLDER)
+                continue
+
+            # Convert single character
+            result.append(ReviewerConfig._convert_glob_char(pattern[i]))
+            i += 1
+
+        return "".join(result)
+
     @staticmethod
     def _glob_to_regex(pattern: str) -> str:
         """
@@ -213,53 +322,14 @@ class ReviewerConfig(BaseModel):
         Returns:
             Regex pattern string.
         """
-        # Handle special cases for ** at boundaries
-        start_placeholder = "\x00START\x00"
-        end_placeholder = "\x00END\x00"
-        ds_placeholder = "\x00DS\x00"
+        # Step 1: Handle boundary patterns (**/  and /**)
+        pattern = ReviewerConfig._handle_boundary_patterns(pattern)
 
-        # **/ at start: optional prefix
-        if pattern.startswith("**/"):
-            pattern = start_placeholder + pattern[3:]
-        # /** at end: optional suffix
-        if pattern.endswith("/**"):
-            pattern = pattern[:-3] + end_placeholder
+        # Step 2: Protect remaining ** from being processed as *
+        pattern = ReviewerConfig._protect_double_stars(pattern)
 
-        # Protect remaining ** from being processed as *
-        pattern = pattern.replace("**", ds_placeholder)
-
-        # Build regex character by character
-        result: list[str] = []
-        i = 0
-        while i < len(pattern):
-            # Check for placeholders
-            if pattern[i:].startswith(start_placeholder):
-                result.append("(.*/)?")  # Optional prefix with /
-                i += len(start_placeholder)
-                continue
-            if pattern[i:].startswith(end_placeholder):
-                result.append("(/.*)?")  # Optional suffix with /
-                i += len(end_placeholder)
-                continue
-            if pattern[i:].startswith(ds_placeholder):
-                result.append(".*")  # ** -> match anything including /
-                i += len(ds_placeholder)
-                continue
-
-            c = pattern[i]
-            if c == "*":
-                result.append("[^/]*")  # * -> match anything except /
-            elif c == "?":
-                result.append("[^/]")  # ? -> match single char except /
-            elif c in ".^$+{}[]|()":
-                result.append("\\" + c)  # Escape regex special chars
-            elif c == "\\":
-                result.append("\\\\")  # Escape backslash
-            else:
-                result.append(c)
-            i += 1
-
-        return "".join(result)
+        # Step 3: Convert placeholders and characters to regex
+        return ReviewerConfig._convert_placeholders_and_chars(pattern)
 
     def should_ignore(self, file_path: str) -> bool:
         """

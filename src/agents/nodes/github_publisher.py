@@ -5,6 +5,8 @@ from enum import StrEnum
 import structlog
 
 from ...app.services.github import GitHubService
+from ...core.config import ReviewerConfig
+from ...core.i18n import Language, get_message
 from ..state import GraphState, ReviewComment
 
 log = structlog.get_logger()
@@ -34,6 +36,10 @@ async def run(state: GraphState) -> dict:
     comments = state["final_comments"]
     summary = state["summary"]
 
+    # Get language from config
+    config: ReviewerConfig = state.get("repo_config", ReviewerConfig())
+    language: Language = config.language if config.language in ("en", "vi", "ja") else "en"
+
     log.info("GitHub publisher started", pr=ctx.pr_number, comments=len(comments))
 
     if not comments:
@@ -47,7 +53,7 @@ async def run(state: GraphState) -> dict:
         {
             "path": c.file,
             "line": c.line,
-            "body": format_comment(c),
+            "body": format_comment(c, language),
         }
         for c in comments
     ]
@@ -73,12 +79,13 @@ async def run(state: GraphState) -> dict:
         return {"errors": [str(e)]}
 
 
-def format_comment(comment: ReviewComment) -> str:
+def format_comment(comment: ReviewComment, language: Language = "en") -> str:
     """
     Format a ReviewComment for GitHub.
 
     Args:
         comment: The review comment to format
+        language: Language code for localized text
 
     Returns:
         Formatted markdown string
@@ -93,8 +100,9 @@ def format_comment(comment: ReviewComment) -> str:
         comment.message,
     ]
 
-    # Add suggestion if present
+    # Add suggestion if present (localized)
     if comment.suggestion:
-        parts.extend(["", f"**💡 Gợi ý:** {comment.suggestion}"])
+        suggestion_prefix = get_message("suggestion_prefix", language)
+        parts.extend(["", f"{suggestion_prefix} {comment.suggestion}"])
 
     return "\n".join(parts)
