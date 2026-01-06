@@ -1,83 +1,76 @@
-"""Response templates for command handlers."""
+"""Response templates for command handlers.
 
-# Success responses
-FIX_SUCCESS = """\
-## 🔧 Suggested Fix
-
-```suggestion
-{fixed_code}
-```
-
-**Giải thích:** {explanation}
-
----
-
-_Click "Commit suggestion" để apply fix này._
+This module provides language-aware response templates using the i18n system.
+For backward compatibility, it also exports the original template constants
+which now delegate to the i18n system with English as default.
 """
 
-EXPLAIN_SUCCESS = """\
-## 🔍 Giải Thích Chi Tiết
+from ..core.i18n import Language, get_message
 
-{content}
+# Re-export for backward compatibility (defaults to English)
+FIX_SUCCESS = get_message("fix_success", "en")
+EXPLAIN_SUCCESS = get_message("explain_success", "en")
+TESTS_SUCCESS = get_message("tests_success", "en")
+HELP_MESSAGE = get_message("help_message", "en")
+ERROR_NO_PARENT_COMMENT = get_message("error_no_parent_comment", "en")
+ERROR_CANNOT_FETCH_COMMENT = get_message("error_cannot_fetch_comment", "en")
+ERROR_CANNOT_READ_FILE = get_message("error_cannot_read_file", "en")
+ERROR_CANNOT_GENERATE_FIX = get_message("error_cannot_generate_fix", "en")
+ERROR_NO_FILES_FOUND = get_message("error_no_files_found", "en")
+ERROR_NO_MATCHING_FILES = get_message("error_no_matching_files", "en")
+ERROR_UNKNOWN_COMMAND = get_message("error_unknown_command", "en")
 
----
 
-_Nếu vẫn chưa rõ, hãy hỏi thêm!_
-"""
+def get_fix_success(language: Language = "en", **kwargs: str) -> str:
+    """Get localized fix success message."""
+    return get_message("fix_success", language, **kwargs)
 
-TESTS_SUCCESS = """\
-## 🧪 Generated Unit Tests
 
-**Files analyzed:** {files_list}
+def get_explain_success(language: Language = "en", **kwargs: str) -> str:
+    """Get localized explain success message."""
+    return get_message("explain_success", language, **kwargs)
 
-{content}
 
----
+def get_tests_success(language: Language = "en", **kwargs: str) -> str:
+    """Get localized tests success message."""
+    return get_message("tests_success", language, **kwargs)
 
-_Copy tests này vào test file của bạn. Adjust imports nếu cần._
-"""
 
-HELP_MESSAGE = """\
-## 🤖 AI Reviewer Commands
+def get_help_message(language: Language = "en") -> str:
+    """Get localized help message."""
+    return get_message("help_message", language)
 
-| Command                    | Mô tả                        |
-| -------------------------- | ---------------------------- |
-| `@reviewer fix this`       | Tạo suggested fix cho issue  |
-| `@reviewer explain`        | Giải thích chi tiết về issue |
-| `@reviewer generate tests` | Tạo unit tests cho PR        |
-| `@reviewer help`           | Hiện help này                |
 
-### Cách sử dụng
+def get_error_no_parent_comment(language: Language = "en") -> str:
+    """Get localized error message for missing parent comment."""
+    return get_message("error_no_parent_comment", language)
 
-**Fix & Explain:** Reply trực tiếp vào review comment
 
-```
-@reviewer fix this
-```
+def get_error_cannot_fetch_comment(language: Language = "en") -> str:
+    """Get localized error message for fetch failure."""
+    return get_message("error_cannot_fetch_comment", language)
 
-**Generate Tests:** Comment ở bất kỳ đâu trong PR
 
-```
-@reviewer generate tests
-@reviewer generate tests for auth.py
-```
-"""
+def get_error_cannot_read_file(language: Language = "en") -> str:
+    """Get localized error message for file read failure."""
+    return get_message("error_cannot_read_file", language)
 
-# Error responses
-ERROR_NO_PARENT_COMMENT = """\
-❌ **Không tìm thấy review comment**
 
-Vui lòng reply trực tiếp vào một review comment \
-(comment trên code, không phải conversation comment).
-"""
+def get_error_cannot_generate_fix(language: Language = "en") -> str:
+    """Get localized error message for fix generation failure."""
+    return get_message("error_cannot_generate_fix", language)
 
-ERROR_CANNOT_FETCH_COMMENT = "❌ Không thể lấy thông tin review comment."
-ERROR_CANNOT_READ_FILE = "❌ Không thể đọc nội dung file."
-ERROR_CANNOT_GENERATE_FIX = "❌ Không thể generate fix. Vui lòng thử lại hoặc sửa thủ công."
-ERROR_NO_FILES_FOUND = "❌ Không tìm thấy files changed trong PR."
-ERROR_NO_MATCHING_FILES = "❌ Không tìm thấy file phù hợp{target_info}"
-ERROR_UNKNOWN_COMMAND = """\
-❓ **Không hiểu command**
 
-Thử `@reviewer help` để xem danh sách commands.
-"""
+def get_error_no_files_found(language: Language = "en") -> str:
+    """Get localized error message for no files found."""
+    return get_message("error_no_files_found", language)
+
+
+def get_error_no_matching_files(language: Language = "en", **kwargs: str) -> str:
+    """Get localized error message for no matching files."""
+    return get_message("error_no_matching_files", language, **kwargs)
+
+
+def get_error_unknown_command(language: Language = "en") -> str:
+    """Get localized error message for unknown command."""
+    return get_message("error_unknown_command", language)

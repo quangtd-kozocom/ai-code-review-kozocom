@@ -5,6 +5,68 @@ This module centralizes commonly used mappings and patterns to avoid duplication
 
 from pathlib import Path
 
+__all__ = [
+    # LLM Configuration
+    "DEFAULT_LLM_TEMPERATURE",
+    "DEFAULT_LLM_MAX_TOKENS",
+    # Database Configuration
+    "DEFAULT_DB_POOL_SIZE",
+    "DEFAULT_DB_MAX_OVERFLOW",
+    # HTTP Configuration
+    "DEFAULT_HTTP_TIMEOUT",
+    # Slack Configuration
+    "SLACK_MESSAGE_CHAR_LIMIT",
+    # Celery Configuration
+    "CELERY_TASK_TIME_LIMIT",
+    "CELERY_TASK_SOFT_TIME_LIMIT",
+    "CELERY_PR_RETRY_COUNTDOWN",
+    "CELERY_COMMAND_RETRY_COUNTDOWN",
+    # Chat Command Configuration
+    "MAX_FILES_FOR_TEST_GENERATION",
+    # Mappings and patterns
+    "LANGUAGE_MAP",
+    "SKIP_PATTERNS",
+    "IGNORE_PATTERNS",
+    # Functions
+    "get_language_from_path",
+    "get_language_or_none",
+]
+
+# =============================================================================
+# LLM Configuration
+# =============================================================================
+DEFAULT_LLM_TEMPERATURE: float = 0.1
+DEFAULT_LLM_MAX_TOKENS: int = 65536
+
+# =============================================================================
+# Database Configuration
+# =============================================================================
+DEFAULT_DB_POOL_SIZE: int = 5
+DEFAULT_DB_MAX_OVERFLOW: int = 10
+
+# =============================================================================
+# HTTP Configuration
+# =============================================================================
+DEFAULT_HTTP_TIMEOUT: float = 30.0
+
+# =============================================================================
+# Slack Configuration
+# =============================================================================
+SLACK_MESSAGE_CHAR_LIMIT: int = 2000
+
+# =============================================================================
+# Celery Configuration
+# =============================================================================
+CELERY_TASK_TIME_LIMIT: int = 300  # seconds
+CELERY_TASK_SOFT_TIME_LIMIT: int = 280  # seconds
+CELERY_PR_RETRY_COUNTDOWN: int = 60  # seconds
+CELERY_COMMAND_RETRY_COUNTDOWN: int = 30  # seconds
+
+# =============================================================================
+# Chat Command Configuration
+# =============================================================================
+MAX_FILES_FOR_TEST_GENERATION: int = 3
+
 # File extension to programming language mapping
 LANGUAGE_MAP: dict[str, str] = {
     # Python

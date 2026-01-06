@@ -79,7 +79,7 @@ def _handle_pull_request(payload: dict) -> dict:
         repo=repo["full_name"],
     )
 
-    from src.workers.tasks import review_pr
+    from ....workers.tasks import review_pr
 
     review_pr.delay(
         owner=repo["owner"]["login"],
@@ -110,7 +110,7 @@ def _handle_issue_comment(payload: dict) -> dict:
         author=comment["user"]["login"],
     )
 
-    from src.workers.tasks import handle_command
+    from ....workers.tasks import handle_command
 
     handle_command.delay(
         owner=payload["repository"]["owner"]["login"],
@@ -143,7 +143,7 @@ def _handle_review_comment(payload: dict) -> dict:
         author=comment["user"]["login"],
     )
 
-    from src.workers.tasks import handle_command
+    from ....workers.tasks import handle_command
 
     handle_command.delay(
         owner=payload["repository"]["owner"]["login"],

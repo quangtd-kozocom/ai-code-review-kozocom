@@ -27,7 +27,7 @@ async def run(state: GraphState) -> dict:
 
     # Send notification
     slack = SlackService()
-    slack.send_review_notification(
+    await slack.send_review_notification(
         pr_number=ctx.pr_number,
         repo=f"{ctx.owner}/{ctx.repo}",
         pr_url=pr_url,

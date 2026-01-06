@@ -1,22 +1,25 @@
 import structlog
-from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_client import AsyncWebClient
 
-from ..config import get_settings
+from ...core.constants import SLACK_MESSAGE_CHAR_LIMIT
+from ..config import Settings, get_settings
+
+__all__ = ["SlackService"]
 
 log = structlog.get_logger()
 
 
 class SlackService:
-    """Slack notification service."""
+    """Async Slack notification service."""
 
-    def __init__(self):
-        self.settings = get_settings()
-        self.client = None
+    def __init__(self) -> None:
+        self.settings: Settings = get_settings()
+        self.client: AsyncWebClient | None = None
         if self.settings.SLACK_BOT_TOKEN:
-            self.client = WebClient(token=self.settings.SLACK_BOT_TOKEN)
+            self.client = AsyncWebClient(token=self.settings.SLACK_BOT_TOKEN)
 
-    def send_review_notification(
+    async def send_review_notification(
         self,
         pr_number: int,
         repo: str,
@@ -25,14 +28,26 @@ class SlackService:
         critical_count: int = 0,
         warning_count: int = 0,
     ) -> bool:
-        """Send a review notification to Slack."""
+        """Send a review notification to Slack.
+
+        Args:
+            pr_number: The pull request number.
+            repo: The repository name (owner/repo format).
+            pr_url: The URL to the pull request.
+            summary: The review summary text.
+            critical_count: Number of critical issues found.
+            warning_count: Number of warning issues found.
+
+        Returns:
+            True if notification was sent successfully, False otherwise.
+        """
         if not self.client:
             log.debug("Slack not configured, skipping notification")
             return False
 
         # Build message blocks
         emoji = "🔴" if critical_count > 0 else "🟢"
-        blocks = [
+        blocks: list[dict] = [
             {
                 "type": "header",
                 "text": {
@@ -44,7 +59,7 @@ class SlackService:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": summary[:2000],  # Slack has character limits
+                    "text": summary[:SLACK_MESSAGE_CHAR_LIMIT],  # Slack has character limits
                 },
             },
             {
@@ -69,7 +84,7 @@ class SlackService:
         ]
 
         try:
-            self.client.chat_postMessage(
+            await self.client.chat_postMessage(
                 channel=self.settings.SLACK_CHANNEL,
                 blocks=blocks,
                 text=f"AI Review for {repo} #{pr_number}",
@@ -77,5 +92,11 @@ class SlackService:
             log.info("Slack notification sent", pr=pr_number, repo=repo)
             return True
         except SlackApiError as e:
-            log.error("Slack notification failed", error=str(e))
+            log.error(
+                "Slack notification failed",
+                error=str(e),
+                response=e.response.data if e.response else None,
+                pr=pr_number,
+                repo=repo,
+            )
             return False

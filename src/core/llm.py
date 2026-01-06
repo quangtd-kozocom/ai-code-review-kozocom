@@ -5,9 +5,11 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
-from tenacity import retry, stop_after_attempt, wait_exponential
 
-from ..app.config import get_settings
+from ..app.config import Settings, get_settings
+from .constants import DEFAULT_LLM_MAX_TOKENS, DEFAULT_LLM_TEMPERATURE
+
+__all__ = ["get_llm", "get_structured_llm"]
 
 log = structlog.get_logger()
 
@@ -74,7 +76,7 @@ def get_structured_llm[T: BaseModel](
     return llm.with_structured_output(output_schema)
 
 
-def _create_llm(model: str | None, settings) -> BaseChatModel:
+def _create_llm(model: str | None, settings: Settings) -> BaseChatModel:
     """
     Create an LLM instance based on configuration.
 
@@ -93,8 +95,8 @@ def _create_llm(model: str | None, settings) -> BaseChatModel:
             model=model_name,
             api_key=settings.OPENROUTER_API_KEY,
             base_url="https://openrouter.ai/api/v1",
-            temperature=0.1,
-            max_tokens=4096,
+            temperature=DEFAULT_LLM_TEMPERATURE,
+            max_tokens=DEFAULT_LLM_MAX_TOKENS,
             default_headers={
                 "HTTP-Referer": settings.APP_URL or "https://ai-code-reviewer.local",
                 "X-Title": "AI Code Reviewer",
@@ -108,8 +110,8 @@ def _create_llm(model: str | None, settings) -> BaseChatModel:
         return ChatOpenAI(
             model=model_name,
             api_key=settings.OPENAI_API_KEY,
-            temperature=0.1,
-            max_tokens=4096,
+            temperature=DEFAULT_LLM_TEMPERATURE,
+            max_tokens=DEFAULT_LLM_MAX_TOKENS,
         )
 
     # Priority 3: Anthropic
@@ -119,26 +121,10 @@ def _create_llm(model: str | None, settings) -> BaseChatModel:
         return ChatAnthropic(
             model=model_name,
             api_key=settings.ANTHROPIC_API_KEY,
-            temperature=0.1,
-            max_tokens=4096,
+            temperature=DEFAULT_LLM_TEMPERATURE,
+            max_tokens=DEFAULT_LLM_MAX_TOKENS,
         )
 
     raise ValueError(
         "No LLM API key configured. Set OPENROUTER_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
     )
-
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-async def invoke_llm(llm: BaseChatModel, prompt: str) -> str:
-    """
-    Invoke LLM with retry logic.
-
-    Args:
-        llm: The LLM instance to invoke.
-        prompt: The prompt to send.
-
-    Returns:
-        The LLM response content as string.
-    """
-    response = await llm.ainvoke(prompt)
-    return response.content

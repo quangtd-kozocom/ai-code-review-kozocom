@@ -5,6 +5,8 @@ import structlog
 
 from ..app.config import get_settings
 
+__all__ = ["setup_logging"]
+
 
 def setup_logging():
     """Configure structured logging with structlog."""

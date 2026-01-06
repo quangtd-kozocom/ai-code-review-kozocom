@@ -8,6 +8,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+__all__ = [
+    "AgentFinding",
+    "AgentFindings",
+    "FixResult",
+    "ExplainResult",
+]
+
 
 class AgentFinding(BaseModel):
     """

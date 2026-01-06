@@ -1,83 +1,16 @@
 """Security agent for analyzing code vulnerabilities.
 
-Uses LangChain structured output for type-safe LLM responses.
+Uses the base agent factory for shared logic.
+Supports per-repository configuration via ReviewerConfig.
 """
 
-import asyncio
-from typing import TYPE_CHECKING
-
-import structlog
-
-from ...core.llm import get_structured_llm
-from ..models import AgentFindings
 from ..prompts.security import PROMPT
-from ..state import ReviewComment
+from .base_agent import create_agent_runner
 
-if TYPE_CHECKING:
-    from ..state import GraphState
+AGENT_NAME = "security"
 
-log = structlog.get_logger()
-
-MAX_CONCURRENT_CALLS = 5
-MIN_CONFIDENCE_THRESHOLD = 0.7
-
-
-async def run(state: "GraphState") -> dict:
-    """
-    Analyze code for security vulnerabilities.
-
-    Processes all files in parallel with a semaphore to limit concurrency.
-    Uses structured output for reliable parsing of LLM responses.
-
-    Args:
-        state: Current graph state containing files to analyze.
-
-    Returns:
-        Dict with 'comments' key containing list of ReviewComment.
-    """
-    files_to_scan = [f for f in state["files"] if f.patch]
-    log.info("Security agent started", files=len(files_to_scan))
-
-    structured_llm = get_structured_llm(AgentFindings)
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
-
-    async def process_file(file) -> list[ReviewComment]:
-        """Process a single file for security issues."""
-        if not file.patch:
-            return []
-
-        prompt = PROMPT.format(
-            filename=file.filename,
-            language=file.language or "text",
-            diff=file.patch,
-        )
-
-        try:
-            async with semaphore:
-                result: AgentFindings = await structured_llm.ainvoke(prompt)
-
-            return [
-                ReviewComment(
-                    file=file.filename,
-                    line=finding.line,
-                    severity=finding.severity,
-                    category="security",
-                    message=finding.message,
-                    suggestion=finding.suggestion,
-                    confidence=finding.confidence,
-                    agent="security",
-                )
-                for finding in result.findings
-                if finding.confidence >= MIN_CONFIDENCE_THRESHOLD
-            ]
-        except Exception as e:
-            log.error("Security agent error", file=file.filename, error=str(e))
-            return []
-
-    tasks = [process_file(file) for file in files_to_scan]
-    results = await asyncio.gather(*tasks)
-
-    comments = [comment for file_comments in results for comment in file_comments]
-
-    log.info("Security scan complete", findings=len(comments))
-    return {"comments": comments}
+run = create_agent_runner(
+    agent_name=AGENT_NAME,
+    prompt_template=PROMPT,
+    check_type="security",
+)
