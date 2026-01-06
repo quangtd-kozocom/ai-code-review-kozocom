@@ -32,39 +32,27 @@ __all__ = [
     "get_language_or_none",
 ]
 
-# =============================================================================
 # LLM Configuration
-# =============================================================================
 DEFAULT_LLM_TEMPERATURE: float = 0.1
 DEFAULT_LLM_MAX_TOKENS: int = 65536
 
-# =============================================================================
 # Database Configuration
-# =============================================================================
 DEFAULT_DB_POOL_SIZE: int = 5
 DEFAULT_DB_MAX_OVERFLOW: int = 10
 
-# =============================================================================
 # HTTP Configuration
-# =============================================================================
 DEFAULT_HTTP_TIMEOUT: float = 30.0
 
-# =============================================================================
 # Slack Configuration
-# =============================================================================
 SLACK_MESSAGE_CHAR_LIMIT: int = 2000
 
-# =============================================================================
 # Celery Configuration
-# =============================================================================
 CELERY_TASK_TIME_LIMIT: int = 300  # seconds
 CELERY_TASK_SOFT_TIME_LIMIT: int = 280  # seconds
 CELERY_PR_RETRY_COUNTDOWN: int = 60  # seconds
 CELERY_COMMAND_RETRY_COUNTDOWN: int = 30  # seconds
 
-# =============================================================================
 # Chat Command Configuration
-# =============================================================================
 MAX_FILES_FOR_TEST_GENERATION: int = 3
 
 # File extension to programming language mapping

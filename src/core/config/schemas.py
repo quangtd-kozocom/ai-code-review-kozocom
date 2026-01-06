@@ -15,9 +15,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# ═══════════════════════════════════════════════════════════
-# GLOB TO REGEX CONSTANTS (module-level to avoid Pydantic conflicts)
-# ═══════════════════════════════════════════════════════════
 _GLOB_START_PLACEHOLDER = "\x00START\x00"
 _GLOB_END_PLACEHOLDER = "\x00END\x00"
 _GLOB_DOUBLE_STAR_PLACEHOLDER = "\x00DS\x00"
@@ -172,10 +169,6 @@ class ReviewerConfig(BaseModel):
         default_factory=ChatConfig,
     )
 
-    # ═══════════════════════════════════════════════════════════
-    # HELPER METHODS
-    # ═══════════════════════════════════════════════════════════
-
     def get_threshold(self) -> float:
         """Get effective threshold based on profile."""
         profile_thresholds = {
@@ -199,26 +192,9 @@ class ReviewerConfig(BaseModel):
             return self.reviews.max_comments_per_file
         return profile_limits.get(self.reviews.profile, 10)
 
-    # ═══════════════════════════════════════════════════════════
-    # GLOB TO REGEX HELPERS
-    # ═══════════════════════════════════════════════════════════
-
     @staticmethod
     def _handle_boundary_patterns(pattern: str) -> str:
-        """
-        Handle special ** patterns at boundaries.
-
-        Converts:
-        - **/ at start → placeholder for "any prefix or no prefix"
-        - /** at end → placeholder for "any suffix or no suffix"
-
-        Args:
-            pattern: Glob pattern string.
-
-        Returns:
-            Pattern with boundary ** replaced by placeholders.
-        """
-        # **/ at start: optional prefix
+        """Replace **/ at start and /** at end with placeholders."""
         if pattern.startswith("**/"):
             pattern = _GLOB_START_PLACEHOLDER + pattern[3:]
         # /** at end: optional suffix
@@ -228,28 +204,12 @@ class ReviewerConfig(BaseModel):
 
     @staticmethod
     def _protect_double_stars(pattern: str) -> str:
-        """
-        Replace ** with placeholder to prevent processing as single *.
-
-        Args:
-            pattern: Glob pattern (after boundary handling).
-
-        Returns:
-            Pattern with ** replaced by placeholder.
-        """
+        """Replace ** with placeholder to prevent processing as single *."""
         return pattern.replace("**", _GLOB_DOUBLE_STAR_PLACEHOLDER)
 
     @staticmethod
     def _convert_glob_char(char: str) -> str:
-        """
-        Convert a single glob character to its regex equivalent.
-
-        Args:
-            char: Single character from glob pattern.
-
-        Returns:
-            Regex equivalent string.
-        """
+        """Convert a single glob character to its regex equivalent."""
         if char == "*":
             return "[^/]*"  # Match anything except /
         elif char == "?":
@@ -263,21 +223,7 @@ class ReviewerConfig(BaseModel):
 
     @staticmethod
     def _convert_placeholders_and_chars(pattern: str) -> str:
-        """
-        Convert placeholders and glob characters to regex.
-
-        Processes the pattern character by character, handling:
-        - START placeholder → (.*/)?
-        - END placeholder → (/.*)?
-        - DOUBLE_STAR placeholder → .*
-        - Single glob characters via _convert_glob_char
-
-        Args:
-            pattern: Prepared pattern with placeholders.
-
-        Returns:
-            Regex pattern string.
-        """
+        """Convert placeholders and glob characters to regex."""
         result: list[str] = []
         i = 0
 
@@ -304,45 +250,13 @@ class ReviewerConfig(BaseModel):
 
     @staticmethod
     def _glob_to_regex(pattern: str) -> str:
-        """
-        Convert glob pattern to regex with proper ** handling.
-
-        Handles:
-        - ** matches any path including / (zero or more path segments)
-        - * matches anything except /
-        - ? matches single char except /
-
-        Special handling:
-        - **/ at start means "any prefix or no prefix"
-        - /** at end means "any suffix or no suffix"
-
-        Args:
-            pattern: Glob pattern string.
-
-        Returns:
-            Regex pattern string.
-        """
-        # Step 1: Handle boundary patterns (**/  and /**)
+        """Convert glob pattern to regex with proper ** handling."""
         pattern = ReviewerConfig._handle_boundary_patterns(pattern)
-
-        # Step 2: Protect remaining ** from being processed as *
         pattern = ReviewerConfig._protect_double_stars(pattern)
-
-        # Step 3: Convert placeholders and characters to regex
         return ReviewerConfig._convert_placeholders_and_chars(pattern)
 
     def should_ignore(self, file_path: str) -> bool:
-        """
-        Check if file should be ignored.
-
-        Supports glob patterns with ** for recursive matching.
-
-        Args:
-            file_path: Path to check against ignore patterns.
-
-        Returns:
-            True if file should be ignored.
-        """
+        """Check if file matches any ignore pattern."""
         for pattern in self.ignore:
             if "**" in pattern or "*" in pattern or "?" in pattern:
                 regex = self._glob_to_regex(pattern)
@@ -353,15 +267,7 @@ class ReviewerConfig(BaseModel):
         return False
 
     def get_path_instructions(self, file_path: str) -> list[str]:
-        """
-        Get matching instructions for a file.
-
-        Args:
-            file_path: Path to check against instruction patterns.
-
-        Returns:
-            List of instruction strings.
-        """
+        """Get matching instructions for a file path."""
         instructions: list[str] = []
         for pi in self.reviews.path_instructions:
             if "**" in pi.path or "*" in pi.path or "?" in pi.path:
@@ -379,18 +285,7 @@ class ReviewerConfig(BaseModel):
         base_branch: str,
         is_draft: bool,
     ) -> bool:
-        """
-        Determine if PR should be auto-reviewed.
-
-        Args:
-            title: PR title.
-            author: PR author username.
-            base_branch: Target branch name.
-            is_draft: Whether PR is a draft.
-
-        Returns:
-            True if PR should be auto-reviewed.
-        """
+        """Determine if PR should be auto-reviewed based on config rules."""
         auto = self.reviews.auto_review
 
         if not auto.enabled:
@@ -399,17 +294,14 @@ class ReviewerConfig(BaseModel):
         if is_draft and not auto.drafts:
             return False
 
-        # Check skip keywords
         title_lower = title.lower()
         for keyword in auto.skip_keywords:
             if keyword.lower() in title_lower:
                 return False
 
-        # Check ignored authors
         if author in auto.ignore_authors:
             return False
 
-        # Check base branch filter
         if auto.base_branches and base_branch not in auto.base_branches:
             return False
 

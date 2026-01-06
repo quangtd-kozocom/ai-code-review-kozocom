@@ -1,16 +1,10 @@
-"""Security agent for analyzing code vulnerabilities.
-
-Uses the base agent factory for shared logic.
-Supports per-repository configuration via ReviewerConfig.
-"""
+"""Security agent for analyzing code vulnerabilities."""
 
 from ..prompts.security import PROMPT
 from .base_agent import create_agent_runner
 
-AGENT_NAME = "security"
-
 run = create_agent_runner(
-    agent_name=AGENT_NAME,
+    agent_name="security",
     prompt_template=PROMPT,
     check_type="security",
 )

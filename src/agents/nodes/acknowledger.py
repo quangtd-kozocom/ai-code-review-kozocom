@@ -1,3 +1,5 @@
+"""Acknowledger node - posts initial processing notification to PR."""
+
 import structlog
 
 from ...app.services.github import GitHubService
@@ -5,7 +7,8 @@ from ..state import GraphState
 
 log = structlog.get_logger()
 
-ACKNOWLEDGE_MESSAGE = """🤖 **AI Code Review Started**
+_ACKNOWLEDGE_MESSAGE = """\
+🤖 **AI Code Review Started**
 
 I'm analyzing your pull request. This may take a moment...
 
@@ -21,7 +24,7 @@ I'll post my review shortly. Thanks for your patience! ⏳
 async def run(state: GraphState) -> dict:
     """Post initial acknowledgment comment to PR."""
     ctx = state["context"]
-    log.info("Acknowledger started", pr=ctx.pr_number)
+    log.info("acknowledger.started", pr=ctx.pr_number)
 
     github = GitHubService(ctx.installation_id)
 
@@ -30,11 +33,12 @@ async def run(state: GraphState) -> dict:
             owner=ctx.owner,
             repo=ctx.repo,
             pr_number=ctx.pr_number,
-            body=ACKNOWLEDGE_MESSAGE,
+            body=_ACKNOWLEDGE_MESSAGE,
         )
-        log.info("Acknowledgment posted", comment_id=comment_id, pr=ctx.pr_number)
+        log.info("acknowledger.posted", comment_id=comment_id, pr=ctx.pr_number)
         return {"acknowledge_comment_id": comment_id}
+
     except Exception as e:
-        # Don't fail the whole workflow if acknowledgment fails
-        log.warning("Failed to post acknowledgment", error=str(e), pr=ctx.pr_number)
+        # Don't fail the workflow if acknowledgment fails
+        log.warning("acknowledger.failed", error=str(e), pr=ctx.pr_number)
         return {"acknowledge_comment_id": None}

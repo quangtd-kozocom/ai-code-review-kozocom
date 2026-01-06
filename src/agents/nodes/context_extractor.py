@@ -1,37 +1,58 @@
-"""
-Context extractor node - loads config and PR files.
-
-Responsible for:
-1. Loading repository configuration
-2. Checking auto-review settings
-3. Filtering files by ignore patterns
-"""
+"""Context extractor node - loads repository config and PR file changes."""
 
 import structlog
 
 from ...app.services.github import GitHubService
-from ...core.config import create_config_service
+from ...core.config import ReviewerConfig, create_config_service
 from ...core.constants import get_language_or_none
-from ..state import FileChange, GraphState
+from ..state import FileChange, GraphState, PRContext
 
 log = structlog.get_logger()
 
 
+def _convert_to_file_change(raw: dict) -> FileChange:
+    """Convert a raw GitHub file dict to FileChange model."""
+    return FileChange(
+        filename=raw["filename"],
+        status=raw["status"],
+        additions=raw["additions"],
+        deletions=raw["deletions"],
+        patch=raw.get("patch", ""),
+        language=get_language_or_none(raw["filename"]),
+    )
+
+
+def _filter_files(
+    raw_files: list[dict],
+    config: ReviewerConfig,
+) -> tuple[list[FileChange], int]:
+    """Filter and convert raw files, returning (files, ignored_count)."""
+    files: list[FileChange] = []
+    ignored = 0
+
+    for raw in raw_files:
+        if config.should_ignore(raw["filename"]):
+            ignored += 1
+            continue
+        files.append(_convert_to_file_change(raw))
+
+    return files, ignored
+
+
+def _should_skip_review(config: ReviewerConfig, ctx: PRContext) -> bool:
+    """Check if PR should be skipped based on auto-review settings."""
+    return not config.should_auto_review(
+        title=ctx.title,
+        author=ctx.author,
+        base_branch=ctx.base_branch,
+        is_draft=ctx.is_draft,
+    )
+
+
 async def run(state: GraphState) -> dict:
-    """
-    Extract context: load config and PR files.
-
-    Resolution order for config:
-    1. Redis cache
-    2. .reviewer.yaml from GitHub
-    3. Database stored config
-    4. Default values
-
-    Returns:
-        dict with 'files' and 'repo_config'
-    """
+    """Load repository config and extract PR file changes."""
     ctx = state["context"]
-    log.info("Context extractor started", pr=ctx.pr_number, repo=f"{ctx.owner}/{ctx.repo}")
+    log.info("context_extractor.started", pr=ctx.pr_number, repo=f"{ctx.owner}/{ctx.repo}")
 
     github = GitHubService(ctx.installation_id)
 
@@ -40,68 +61,31 @@ async def run(state: GraphState) -> dict:
     config = await config_service.get_config(ctx.owner, ctx.repo)
 
     log.info(
-        "Config loaded",
-        owner=ctx.owner,
-        repo=ctx.repo,
+        "context_extractor.config_loaded",
         profile=config.reviews.profile,
         ignore_patterns=len(config.ignore),
         path_instructions=len(config.reviews.path_instructions),
     )
 
-    # Check if should auto-review
-    if not config.should_auto_review(
-        title=ctx.title,
-        author=ctx.author,
-        base_branch=ctx.base_branch,
-        is_draft=ctx.is_draft,
-    ):
+    # Check auto-review settings
+    if _should_skip_review(config, ctx):
         log.info(
-            "PR skipped by auto-review settings",
+            "context_extractor.skipped",
+            reason="auto_review_settings",
             pr=ctx.pr_number,
-            title=ctx.title,
             author=ctx.author,
         )
-        return {
-            "files": [],
-            "repo_config": config,
-        }
+        return {"files": [], "repo_config": config}
 
-    # Get PR files
+    # Fetch and filter files
     raw_files = await github.get_pr_files(ctx.owner, ctx.repo, ctx.pr_number)
-
-    # Filter and convert files
-    files: list[FileChange] = []
-    ignored_count = 0
-
-    for f in raw_files:
-        filename = f["filename"]
-
-        # Apply ignore patterns from config
-        if config.should_ignore(filename):
-            log.debug("File ignored by config", file=filename)
-            ignored_count += 1
-            continue
-
-        files.append(
-            FileChange(
-                filename=filename,
-                status=f["status"],
-                additions=f["additions"],
-                deletions=f["deletions"],
-                patch=f.get("patch", ""),
-                language=get_language_or_none(filename),
-            )
-        )
+    files, ignored_count = _filter_files(raw_files, config)
 
     log.info(
-        "Context extracted",
-        total_files=len(raw_files),
-        filtered_files=len(files),
-        ignored_files=ignored_count,
-        pr=ctx.pr_number,
+        "context_extractor.completed",
+        total=len(raw_files),
+        included=len(files),
+        ignored=ignored_count,
     )
 
-    return {
-        "files": files,
-        "repo_config": config,
-    }
+    return {"files": files, "repo_config": config}

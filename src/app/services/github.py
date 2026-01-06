@@ -19,10 +19,9 @@ __all__ = ["GitHubService"]
 
 log = structlog.get_logger()
 
-# Retry configuration
 MAX_RETRIES = 3
-RETRY_MIN_WAIT = 1  # seconds
-RETRY_MAX_WAIT = 10  # seconds
+RETRY_MIN_WAIT = 1
+RETRY_MAX_WAIT = 10
 
 
 def _is_retryable_status(response: httpx.Response) -> bool:
@@ -56,10 +55,8 @@ class GitHubService:
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the shared HTTP client."""
-        client = self._client
-        if client is None or client.is_closed:
-            client = httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT)
-            self._client = client
+        if (client := self._client) is None or client.is_closed:
+            self._client = client = httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT)
         return client
 
     async def close(self) -> None:
@@ -102,38 +99,12 @@ class GitHubService:
         headers: dict[str, str],
         **kwargs,
     ) -> httpx.Response:
-        """Make an HTTP request with retry logic for transient failures.
-
-        Retries on:
-        - Connection errors
-        - Timeout errors
-        - 5xx server errors
-
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            url: Request URL
-            headers: Request headers
-            **kwargs: Additional arguments passed to httpx request
-
-        Returns:
-            HTTP response
-
-        Raises:
-            httpx.HTTPStatusError: On non-retryable HTTP errors
-            httpx.ConnectError: After max retries on connection errors
-            httpx.TimeoutException: After max retries on timeouts
-        """
+        """Make an HTTP request with retry logic for transient failures."""
         client = await self._get_client()
         resp = await client.request(method, url, headers=headers, **kwargs)
 
-        # Retry on 5xx errors
         if _is_retryable_status(resp):
-            log.warning(
-                "Retryable server error",
-                status=resp.status_code,
-                url=url,
-            )
-            # Raise an exception to trigger retry
+            log.warning("Retryable server error", status=resp.status_code, url=url)
             resp.raise_for_status()
 
         return resp
@@ -143,7 +114,6 @@ class GitHubService:
         if self._token and time.time() < self._token_expires:
             return self._token
 
-        # Create JWT
         now = int(time.time())
         payload = {
             "iat": now - 60,
@@ -152,7 +122,6 @@ class GitHubService:
         }
         jwt_token = jwt.encode(payload, self.settings.GITHUB_PRIVATE_KEY, algorithm="RS256")
 
-        # Exchange for installation token
         resp = await self._request(
             "POST",
             f"{self.BASE_URL}/app/installations/{self.installation_id}/access_tokens",
@@ -162,31 +131,35 @@ class GitHubService:
             },
         )
         resp.raise_for_status()
-        data = resp.json()
-        token: str = data["token"]
-        self._token = token
-        self._token_expires = time.time() + 3500  # ~1 hour
+        self._token = token = resp.json()["token"]
+        self._token_expires = time.time() + 3500
         return token
+
+    async def _api_get(self, endpoint: str, **kwargs) -> httpx.Response:
+        """Make authenticated GET request."""
+        token = await self._get_token()
+        resp = await self._request(
+            "GET", f"{self.BASE_URL}{endpoint}", headers=self._headers(token), **kwargs
+        )
+        return resp
+
+    async def _api_post(self, endpoint: str, json: dict) -> httpx.Response:
+        """Make authenticated POST request."""
+        token = await self._get_token()
+        resp = await self._request(
+            "POST", f"{self.BASE_URL}{endpoint}", headers=self._headers(token), json=json
+        )
+        return resp
 
     async def get_pr_files(self, owner: str, repo: str, pr_number: int) -> list[dict]:
         """Fetch files changed in a PR."""
-        token = await self._get_token()
-        resp = await self._request(
-            "GET",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/files",
-            headers=self._headers(token),
-        )
+        resp = await self._api_get(f"/repos/{owner}/{repo}/pulls/{pr_number}/files")
         resp.raise_for_status()
         return resp.json()
 
     async def get_pr_details(self, owner: str, repo: str, pr_number: int) -> dict:
         """Fetch PR details including title and author."""
-        token = await self._get_token()
-        resp = await self._request(
-            "GET",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}",
-            headers=self._headers(token),
-        )
+        resp = await self._api_get(f"/repos/{owner}/{repo}/pulls/{pr_number}")
         resp.raise_for_status()
         return resp.json()
 
@@ -200,11 +173,8 @@ class GitHubService:
         event: str = "COMMENT",
     ) -> int:
         """Create a PR review with comments."""
-        token = await self._get_token()
-        resp = await self._request(
-            "POST",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
-            headers=self._headers(token),
+        resp = await self._api_post(
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
             json={"body": body, "event": event, "comments": comments},
         )
         resp.raise_for_status()
@@ -212,17 +182,12 @@ class GitHubService:
 
     async def create_pr_comment(self, owner: str, repo: str, pr_number: int, body: str) -> int:
         """Create an issue comment on a PR (not a review comment)."""
-        token = await self._get_token()
-        resp = await self._request(
-            "POST",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments",
-            headers=self._headers(token),
+        resp = await self._api_post(
+            f"/repos/{owner}/{repo}/issues/{pr_number}/comments",
             json={"body": body},
         )
         resp.raise_for_status()
         return resp.json()["id"]
-
-    # ============== NEW METHODS FOR ON-DEMAND COMMANDS ==============
 
     async def get_review_comment(
         self,
@@ -230,24 +195,8 @@ class GitHubService:
         repo: str,
         comment_id: int,
     ) -> dict | None:
-        """
-        Get a single review comment by ID.
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            comment_id: Review comment ID
-
-        Returns:
-            Comment data dict or None if not found
-        """
-        token = await self._get_token()
-
-        resp = await self._request(
-            "GET",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/comments/{comment_id}",
-            headers=self._headers(token),
-        )
+        """Get a single review comment by ID."""
+        resp = await self._api_get(f"/repos/{owner}/{repo}/pulls/comments/{comment_id}")
 
         if resp.status_code == 404:
             log.warning("Review comment not found", comment_id=comment_id)
@@ -265,33 +214,14 @@ class GitHubService:
         line: int,
         context_lines: int = 5,
     ) -> str | None:
-        """
-        Get file content around a specific line at PR head.
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            pr_number: Pull request number
-            path: File path in the repository
-            line: Target line number
-            context_lines: Number of lines before/after to include
-
-        Returns:
-            Formatted code context with line numbers, or None on error
-        """
+        """Get file content around a specific line at PR head."""
         token = await self._get_token()
 
         try:
-            # Get PR to find head SHA
-            pr_resp = await self._request(
-                "GET",
-                f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}",
-                headers=self._headers(token),
-            )
+            pr_resp = await self._api_get(f"/repos/{owner}/{repo}/pulls/{pr_number}")
             pr_resp.raise_for_status()
             ref = pr_resp.json()["head"]["sha"]
 
-            # Get file content at that ref
             file_resp = await self._request(
                 "GET",
                 f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{path}",
@@ -306,11 +236,7 @@ class GitHubService:
             return self._format_code_context(file_resp.text, line, context_lines)
 
         except HTTPStatusError as e:
-            log.error(
-                "Failed to get file content",
-                path=path,
-                status=e.response.status_code,
-            )
+            log.error("Failed to get file content", path=path, status=e.response.status_code)
             return None
         except Exception:
             log.exception("Unexpected error getting file content", path=path)
@@ -336,24 +262,9 @@ class GitHubService:
         issue_number: int,
         body: str,
     ) -> int:
-        """
-        Create a comment on an issue or PR.
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            issue_number: Issue/PR number
-            body: Comment body text
-
-        Returns:
-            Created comment ID
-        """
-        token = await self._get_token()
-
-        resp = await self._request(
-            "POST",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/issues/{issue_number}/comments",
-            headers=self._headers(token),
+        """Create a comment on an issue or PR."""
+        resp = await self._api_post(
+            f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
             json={"body": body},
         )
         resp.raise_for_status()
@@ -369,29 +280,10 @@ class GitHubService:
         comment_id: int,
         body: str,
     ) -> int:
-        """
-        Reply to a review comment.
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            pr_number: Pull request number
-            comment_id: Parent comment ID to reply to
-            body: Reply body text
-
-        Returns:
-            Created reply comment ID
-        """
-        token = await self._get_token()
-
-        resp = await self._request(
-            "POST",
-            f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/comments",
-            headers=self._headers(token),
-            json={
-                "body": body,
-                "in_reply_to": comment_id,
-            },
+        """Reply to a review comment."""
+        resp = await self._api_post(
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+            json={"body": body, "in_reply_to": comment_id},
         )
         resp.raise_for_status()
         reply_id = resp.json()["id"]
@@ -405,18 +297,7 @@ class GitHubService:
         path: str,
         ref: str = "HEAD",
     ) -> str | None:
-        """
-        Get raw file content from repository.
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            path: File path in the repository
-            ref: Git reference (branch/commit/tag), defaults to HEAD
-
-        Returns:
-            File content as string, or None if not found
-        """
+        """Get raw file content from repository."""
         token = await self._get_token()
 
         resp = await self._request(

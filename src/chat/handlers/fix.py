@@ -26,23 +26,11 @@ class FixCommandHandler(BaseCommandHandler):
     """Generate code fix for a review comment issue."""
 
     async def execute(self, ctx: CommandContext) -> str:
-        """
-        Execute the fix command.
-
-        Fetches the parent review comment, gets code context,
-        and uses LLM to generate a fix suggestion.
-
-        Args:
-            ctx: Command context with PR and comment details.
-
-        Returns:
-            Response message with the fix or error.
-        """
+        """Generate a fix suggestion for the parent review comment."""
         if not ctx.requires_parent_comment:
             return ERROR_NO_PARENT_COMMENT
 
         try:
-            # Fetch parent comment details
             parent = await self.github.get_review_comment(ctx.owner, ctx.repo, ctx.in_reply_to_id)
             if not parent:
                 return ERROR_CANNOT_FETCH_COMMENT
@@ -51,14 +39,12 @@ class FixCommandHandler(BaseCommandHandler):
             line = parent.get("line") or parent.get("original_line", 0)
             issue_description = parent.get("body", "")
 
-            # Get code context around the issue
             code_context = await self.github.get_file_content_at_pr(
                 ctx.owner, ctx.repo, ctx.pr_number, file_path, line, context_lines=5
             )
             if not code_context:
                 return ERROR_CANNOT_READ_FILE
 
-            # Generate fix using structured LLM
             language = get_language_from_path(file_path)
             prompt = FIX_PROMPT.format(
                 issue_description=issue_description,

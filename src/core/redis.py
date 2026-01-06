@@ -25,47 +25,34 @@ _connections: WeakValueDictionary[int, Redis] = WeakValueDictionary()
 
 
 async def get_redis() -> Redis:
-    """
-    Get or create Redis connection for the current event loop.
-    
-    Creates a new connection if none exists for the current loop,
-    avoiding 'Event loop is closed' errors in Celery workers.
+    """Get or create Redis connection for the current event loop.
 
-    Returns:
-        Async Redis client.
-
-    Raises:
-        RuntimeError: If REDIS_URL not configured.
+    Creates new connection per loop to avoid 'Event loop is closed' errors.
+    Raises RuntimeError if REDIS_URL not configured.
     """
     from redis.asyncio import from_url
-    
+
     settings = get_settings()
 
     if not settings.REDIS_URL:
         raise RuntimeError("REDIS_URL not configured")
-    
-    # Get current event loop id
+
     try:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
     except RuntimeError:
-        # No running loop - will be handled by caller
         raise RuntimeError("No running event loop")
-    
-    # Check if we have a valid connection for this loop
+
     redis = _connections.get(loop_id)
-    
+
     if redis is not None:
         try:
-            # Verify connection is still valid
             await redis.ping()
             return redis
         except Exception:
-            # Connection is stale, create new one
             log.debug("Stale Redis connection, recreating")
             _connections.pop(loop_id, None)
-    
-    # Create new connection
+
     redis = from_url(
         settings.REDIS_URL,
         encoding="utf-8",
@@ -73,7 +60,7 @@ async def get_redis() -> Redis:
     )
     _connections[loop_id] = redis
     log.info("Redis connection created for loop", loop_id=loop_id)
-    
+
     return redis
 
 
@@ -84,7 +71,7 @@ async def close_redis() -> None:
         loop_id = id(loop)
     except RuntimeError:
         return
-    
+
     redis = _connections.pop(loop_id, None)
     if redis:
         try:

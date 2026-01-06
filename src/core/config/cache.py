@@ -27,19 +27,9 @@ CACHE_PREFIX = "config"
 
 
 class ConfigCache:
-    """
-    Redis cache for repository configurations.
-
-    Uses redis-py async client with hiredis for performance.
-    """
+    """Redis cache for repository configurations."""
 
     def __init__(self, redis: Redis) -> None:
-        """
-        Initialize cache with Redis connection.
-
-        Args:
-            redis: Async Redis client.
-        """
         self.redis = redis
         self.prefix = CACHE_PREFIX
         self.ttl = get_settings().CONFIG_CACHE_TTL
@@ -49,16 +39,7 @@ class ConfigCache:
         return f"{self.prefix}:{owner}:{repo}"
 
     async def get(self, owner: str, repo: str) -> dict[str, Any] | None:
-        """
-        Get cached config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-
-        Returns:
-            Config dict if cached and valid, None otherwise.
-        """
+        """Get cached config, or None if not found."""
         key = self._key(owner, repo)
 
         try:
@@ -79,18 +60,7 @@ class ConfigCache:
         config: dict[str, Any],
         ttl: int | None = None,
     ) -> bool:
-        """
-        Cache config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-            config: Config dict to cache.
-            ttl: Optional custom TTL in seconds.
-
-        Returns:
-            True if cached successfully.
-        """
+        """Cache config with optional TTL override."""
         key = self._key(owner, repo)
         expire = ttl or self.ttl
 
@@ -107,16 +77,7 @@ class ConfigCache:
             return False
 
     async def delete(self, owner: str, repo: str) -> bool:
-        """
-        Delete cached config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-
-        Returns:
-            True if deleted.
-        """
+        """Delete cached config."""
         key = self._key(owner, repo)
 
         try:
