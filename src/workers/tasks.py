@@ -179,3 +179,160 @@ async def _process_command(
         )
 
     log.info("Command completed", command=parsed.type.value, pr=pr_number)
+
+
+# =============================================================================
+# RAG Indexing Tasks
+# =============================================================================
+
+
+@celery_app.task(bind=True, max_retries=3)
+def index_installation(
+    self,
+    installation_id: int,
+    repositories: list[str],
+) -> dict[str, Any]:
+    """
+    Index all repositories for a GitHub App installation.
+
+    Triggered when:
+    - App is installed (installation.created)
+    - Repos are added to installation (installation_repositories.added)
+    """
+    try:
+        return asyncio.run(_run_index_installation(installation_id, repositories))
+    except Exception as e:
+        log.exception(
+            "Indexing failed",
+            installation_id=installation_id,
+            repos=repositories,
+        )
+        raise self.retry(exc=e, countdown=60)
+
+
+async def _run_index_installation(
+    installation_id: int,
+    repositories: list[str],
+) -> dict[str, Any]:
+    """Async implementation of installation indexing."""
+    from ..rag.indexer import create_indexer
+
+    github = GitHubService(installation_id)
+    indexer = create_indexer(github)
+
+    results: dict[str, Any] = {
+        "indexed": [],
+        "failed": [],
+    }
+
+    for repo_full_name in repositories:
+        owner, repo = repo_full_name.split("/")
+
+        try:
+            log.info("Indexing repository", repo=repo_full_name)
+
+            stats = await indexer.index_repository(
+                owner=owner,
+                repo=repo,
+                installation_id=installation_id,
+            )
+
+            results["indexed"].append(
+                {
+                    "repo": repo_full_name,
+                    "stats": stats,
+                }
+            )
+            log.info("Indexed repository", repo=repo_full_name, stats=stats)
+
+        except Exception as e:
+            results["failed"].append(
+                {
+                    "repo": repo_full_name,
+                    "error": str(e),
+                }
+            )
+            log.error("Failed to index repository", repo=repo_full_name, error=str(e))
+
+    return results
+
+
+@celery_app.task(bind=True, max_retries=3)
+def update_rag_index(
+    self,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    installation_id: int,
+) -> dict[str, Any]:
+    """
+    Incrementally update RAG index after PR merge.
+
+    Triggered when:
+    - PR is merged (pull_request.closed with merged=true)
+    """
+    try:
+        return asyncio.run(_run_update_rag_index(owner, repo, pr_number, installation_id))
+    except Exception as e:
+        log.exception(
+            "RAG update failed",
+            owner=owner,
+            repo=repo,
+            pr=pr_number,
+        )
+        raise self.retry(exc=e, countdown=30)
+
+
+async def _run_update_rag_index(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    installation_id: int,
+) -> dict[str, Any]:
+    """Async implementation of incremental RAG update."""
+    from ..rag.indexer import create_indexer
+
+    github = GitHubService(installation_id)
+    indexer = create_indexer(github)
+
+    # Get PR files
+    pr_files = await github.get_pr_files(owner, repo, pr_number)
+
+    # Prepare files with content for added/modified files
+    files_with_content: list[dict] = []
+    for file in pr_files:
+        file_info = {
+            "filename": file["filename"],
+            "status": file["status"],
+        }
+
+        # Fetch content for added/modified files
+        if file["status"] in ("added", "modified"):
+            try:
+                content = await github.get_file_raw(
+                    owner=owner,
+                    repo=repo,
+                    path=file["filename"],
+                    ref="HEAD",  # Get from default branch (after merge)
+                )
+                file_info["content"] = content
+            except Exception as e:
+                log.warning(
+                    "Could not fetch file content",
+                    file=file["filename"],
+                    error=str(e),
+                )
+
+        files_with_content.append(file_info)
+
+    # Update index
+    stats = await indexer.update_files(owner, repo, files_with_content)
+
+    log.info(
+        "Updated RAG index",
+        repo=f"{owner}/{repo}",
+        pr=pr_number,
+        stats=stats,
+    )
+
+    return {"status": "completed", "stats": stats}

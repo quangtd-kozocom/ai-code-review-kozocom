@@ -45,7 +45,19 @@ class TestGitHubWebhook:
 
     def test_webhook_valid_signature(self, app, mock_settings):
         """Test webhook accepts requests with valid signature."""
-        payload = json.dumps({"action": "closed"})
+        # Use a 'closed' action without 'merged' flag - should be ignored
+        payload = json.dumps(
+            {
+                "action": "closed",
+                "pull_request": {"number": 1, "merged": False},
+                "repository": {
+                    "name": "test",
+                    "full_name": "owner/test",
+                    "owner": {"login": "owner"},
+                },
+                "installation": {"id": 123},
+            }
+        )
         secret = mock_settings.GITHUB_WEBHOOK_SECRET
         signature = (
             "sha256=" + hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()

@@ -8,32 +8,32 @@ Tài liệu này hướng dẫn **thứ tự implement** và **cách verify** t�
 
 Trước khi bắt đầu, đảm bảo đã có:
 
-- [ ] Pinecone account + API key (free tier)
-- [ ] OpenAI API key (cho embeddings)
-- [ ] Hiểu project structure hiện tại
+- [x] Pinecone account + API key (free tier)
+- [x] OpenAI API key (cho embeddings)
+- [x] Hiểu project structure hiện tại
 
 ---
 
 ## 🔢 Implementation Order
 
-### Phase 1: Dependencies & Config (30 min)
+### Phase 1: Dependencies & Config (30 min) ✅ COMPLETED
 
 ```
-Step 1.1: Add dependencies
+Step 1.1: Add dependencies ✅
 ──────────────────────────
 File: pyproject.toml
 
 Thêm:
 "pinecone>=5.0.0",
-"tree-sitter>=0.23.0",
-"tree-sitter-languages>=1.10.0",
+"tree-sitter>=0.24.0",
+"tree-sitter-language-pack>=0.7.0",  # Note: Changed from tree-sitter-languages
 "gitpython>=3.1.0",
 
-Verify: uv sync thành công
+Verify: uv sync thành công ✅
 ```
 
 ```
-Step 1.2: Add environment variables
+Step 1.2: Add environment variables ✅
 ───────────────────────────────────
 File: .env.example
 
@@ -41,17 +41,17 @@ Thêm:
 PINECONE_API_KEY=pcsk_xxx
 PINECONE_INDEX_NAME=code-reviewer
 
-Verify: Copy sang .env và điền giá trị thật
+Verify: Copy sang .env và điền giá trị thật ✅
 ```
 
 ```
-Step 1.3: Create RAG config
+Step 1.3: Create RAG config ✅
 ───────────────────────────
 File: src/rag/config.py
 
-Tạo mới theo draft trong 03-implementation-draft.md
+Tạo mới với RAGSettings class
 
-Verify: Import không lỗi
+Verify: Import không lỗi ✅
   python -c "from src.rag.config import get_rag_settings; print(get_rag_settings())"
 ```
 

@@ -25,11 +25,13 @@ __all__ = [
     "MAX_FILES_FOR_TEST_GENERATION",
     # Mappings and patterns
     "LANGUAGE_MAP",
+    "TREESITTER_LANGUAGE_MAP",
     "SKIP_PATTERNS",
     "IGNORE_PATTERNS",
     # Functions
     "get_language_from_path",
     "get_language_or_none",
+    "get_treesitter_language",
 ]
 
 # LLM Configuration
@@ -174,3 +176,30 @@ def get_language_or_none(file_path: str) -> str | None:
     """
     ext = Path(file_path).suffix.lower()
     return LANGUAGE_MAP.get(ext)
+
+
+# Tree-sitter grammar names (differs from LANGUAGE_MAP for tsx vs typescript)
+TREESITTER_LANGUAGE_MAP: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".scala": "scala",
+    ".php": "php",
+    ".rb": "ruby",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".swift": "swift",
+}
+
+
+def get_treesitter_language(file_path: str) -> str | None:
+    """Get tree-sitter grammar name for a file, or None if unsupported."""
+    return TREESITTER_LANGUAGE_MAP.get(Path(file_path).suffix.lower())
