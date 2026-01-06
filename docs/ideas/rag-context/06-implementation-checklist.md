@@ -52,7 +52,7 @@ File: src/rag/config.py
 Tạo mới theo draft trong 03-implementation-draft.md
 
 Verify: Import không lỗi
-  python -c "from src.rag.config import rag_settings; print(rag_settings)"
+  python -c "from src.rag.config import get_rag_settings; print(get_rag_settings())"
 ```
 
 ---
@@ -83,8 +83,9 @@ Tạo: CodeParser class với methods:
 
 Verify: Parse sample file
   python -c "
-  from src.ast.parser import code_parser
-  chunks = code_parser.parse_file('test.py', 'def foo(): pass')
+  from src.ast.parser import get_code_parser
+  parser = get_code_parser()
+  chunks = parser.parse_file('test.py', 'def foo(): pass')
   print(f'Found {len(chunks)} chunks')
   "
 ```
@@ -105,7 +106,8 @@ Tạo: Embedder class với methods:
 
 Verify: Embed sample text
   python -c "
-  from src.rag.embedder import embedder
+  from src.rag.embedder import get_embedder
+  embedder = get_embedder()
   vec = embedder.embed_single('def hello(): pass')
   print(f'Vector dimension: {len(vec)}')  # Should be 1024
   "
@@ -124,8 +126,9 @@ Tạo: VectorStore class với methods:
 
 Verify: Connect to Pinecone
   python -c "
-  from src.rag.vector_store import vector_store
-  print(f'Index: {vector_store.index_name}')
+  from src.rag.vector_store import get_vector_store
+  store = get_vector_store()
+  print(f'Index: {store.index_name}')
   "
 ```
 
@@ -141,7 +144,8 @@ Tạo: Chunker class với methods:
 
 Verify: Chunk sample file
   python -c "
-  from src.rag.chunker import chunker
+  from src.rag.chunker import get_chunker
+  chunker = get_chunker()
   chunks = chunker.chunk_file('test.py', 'class Foo:\n  def bar(self): pass')
   print(f'Chunks: {len(chunks)}')
   "
@@ -243,6 +247,61 @@ pytest tests/test_rag_chunker.py -v
 pytest tests/test_rag_retriever.py -v
 ```
 
+### Unit Test Examples
+
+```python
+# tests/test_ast_parser.py
+import pytest
+from src.ast.parser import get_code_parser
+from src.ast.models import CodeChunk
+
+
+class TestCodeParser:
+    def test_parse_python_function(self):
+        content = '''
+def calculate_total(items, discount=0):
+    """Calculate total price."""
+    return sum(i.price for i in items) * (1 - discount)
+'''
+        parser = get_code_parser()
+        chunks = parser.parse_file("test.py", content)
+
+        assert len(chunks) == 1
+        assert chunks[0].name == "calculate_total"
+        assert chunks[0].chunk_type == "function"
+
+
+# tests/test_rag_retriever.py
+import pytest
+from unittest.mock import MagicMock, patch
+from src.rag.retriever import get_retriever
+from src.ast.models import RelatedCode
+
+
+class TestRetriever:
+    @pytest.mark.asyncio
+    async def test_retrieve_related_code(self):
+        with patch("src.rag.retriever.get_vector_store") as mock_store:
+            mock_store.return_value.query.return_value = [
+                {
+                    "id": "test.py:foo:1",
+                    "score": 0.9,
+                    "metadata": {
+                        "file_path": "test.py",
+                        "name": "foo",
+                        "content": "def foo(): pass",
+                        "chunk_type": "function",
+                    },
+                }
+            ]
+
+            retriever = get_retriever()
+            results = retriever.retrieve("owner", "repo", "calculate_total")
+
+            assert len(results) > 0
+            assert all(isinstance(r, RelatedCode) for r in results)
+```
+
 ### Integration Test
 
 ```bash
@@ -253,7 +312,8 @@ from src.rag.indexer import create_indexer
 from src.app.services.github import GitHubService
 
 async def test():
-    github = GitHubService()
+    # Note: GitHubService requires installation_id for authenticated requests
+    github = GitHubService(installation_id=12345)  # Use your installation ID
     indexer = create_indexer(github)
     # Use a small public repo for testing
     stats = await indexer.index_repository('octocat', 'Hello-World')

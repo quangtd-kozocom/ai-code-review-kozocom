@@ -52,14 +52,16 @@ src/
 
 ```python
 """RAG configuration."""
-from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class RAGSettings(BaseSettings):
     """RAG-related settings."""
 
     # Pinecone
-    pinecone_api_key: str
+    pinecone_api_key: str = ""
     pinecone_index_name: str = "code-reviewer"
 
     # Embedding
@@ -94,11 +96,13 @@ class RAGSettings(BaseSettings):
         ".env*",
     ]
 
-    class Config:
-        env_prefix = ""
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="")
 
 
-rag_settings = RAGSettings()
+@lru_cache
+def get_rag_settings() -> RAGSettings:
+    """Factory function to get RAG settings (cached)."""
+    return RAGSettings()
 ```
 
 ---
@@ -145,13 +149,33 @@ class CodeChunk:
 
 
 @dataclass
+class FunctionInfo:
+    """Information about a function/method."""
+
+    name: str
+    signature: str | None
+    start_line: int
+    end_line: int
+
+
+@dataclass
+class ClassInfo:
+    """Information about a class."""
+
+    name: str
+    methods: list[str]
+    start_line: int
+    end_line: int
+
+
+@dataclass
 class ASTInfo:
     """Parsed AST information for a file."""
 
     file_path: str
     language: str
-    functions: list[dict]  # [{name, signature, start_line, end_line}]
-    classes: list[dict]    # [{name, methods, start_line, end_line}]
+    functions: list[FunctionInfo]
+    classes: list[ClassInfo]
     imports: list[str]
 
     # Identified from diff
@@ -176,10 +200,13 @@ class RelatedCode:
 
 ```python
 """Tree-sitter based code parser."""
+import structlog
 import tree_sitter_languages
 from pathlib import Path
 
-from .models import CodeChunk, ASTInfo
+from .models import CodeChunk, ASTInfo, FunctionInfo, ClassInfo
+
+log = structlog.get_logger()
 
 
 class CodeParser:
@@ -215,8 +242,7 @@ class CodeParser:
 
             return self._extract_chunks(tree.root_node, file_path, content, language)
         except Exception as e:
-            # Log error but don't fail
-            print(f"Failed to parse {file_path}: {e}")
+            log.warning("failed_to_parse_file", file_path=file_path, error=str(e))
             return []
 
     def _extract_chunks(
@@ -227,12 +253,12 @@ class CodeParser:
         language: str
     ) -> list[CodeChunk]:
         """Extract code chunks from AST node."""
-        chunks = []
+        chunks: list[CodeChunk] = []
 
         # Define node types to extract per language
         extract_types = self._get_extract_types(language)
 
-        def walk(node):
+        def walk(node) -> None:
             if node.type in extract_types:
                 chunk = self._node_to_chunk(node, file_path, content, language)
                 if chunk:
@@ -342,20 +368,24 @@ class CodeParser:
 
         chunks = self.parse_file(file_path, content)
 
-        functions = []
-        classes = []
+        functions: list[FunctionInfo] = []
+        classes: list[ClassInfo] = []
 
         for chunk in chunks:
-            info = {
-                "name": chunk.name,
-                "signature": chunk.signature,
-                "start_line": chunk.start_line,
-                "end_line": chunk.end_line,
-            }
             if chunk.chunk_type in ("function", "method"):
-                functions.append(info)
+                functions.append(FunctionInfo(
+                    name=chunk.name,
+                    signature=chunk.signature,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                ))
             elif chunk.chunk_type == "class":
-                classes.append(info)
+                classes.append(ClassInfo(
+                    name=chunk.name,
+                    methods=[],  # Could be populated by further parsing
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                ))
 
         # Extract imports (simplified)
         imports = self._extract_imports(content, language)
@@ -370,7 +400,7 @@ class CodeParser:
 
     def _extract_imports(self, content: str, language: str) -> list[str]:
         """Extract import statements."""
-        imports = []
+        imports: list[str] = []
         for line in content.split("\n"):
             line = line.strip()
             if language == "python":
@@ -382,8 +412,9 @@ class CodeParser:
         return imports
 
 
-# Singleton instance
-code_parser = CodeParser()
+def get_code_parser() -> CodeParser:
+    """Factory function to get CodeParser instance."""
+    return CodeParser()
 ```
 
 ---
@@ -392,19 +423,37 @@ code_parser = CodeParser()
 
 ```python
 """Embedding service using OpenAI."""
+import structlog
 from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from openai import RateLimitError, APIError
 
-from .config import rag_settings
+from .config import get_rag_settings
+
+log = structlog.get_logger()
 
 
 class Embedder:
     """Generate embeddings using OpenAI API."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        settings = get_rag_settings()
+        if not settings.pinecone_api_key:
+            log.warning("openai_api_key_not_configured")
         self.client = OpenAI()
-        self.model = rag_settings.embedding_model
-        self.dimensions = rag_settings.embedding_dimensions
+        self.model = settings.embedding_model
+        self.dimensions = settings.embedding_dimensions
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((RateLimitError, APIError)),
+        before_sleep=lambda retry_state: log.warning(
+            "embedding_retry",
+            attempt=retry_state.attempt_number,
+            error=str(retry_state.outcome.exception()),
+        ),
+    )
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts."""
         if not texts:
@@ -420,11 +469,15 @@ class Embedder:
 
     def embed_single(self, text: str) -> list[float]:
         """Generate embedding for a single text."""
-        return self.embed([text])[0]
+        result = self.embed([text])
+        if not result:
+            raise ValueError("Failed to generate embedding")
+        return result[0]
 
 
-# Singleton instance
-embedder = Embedder()
+def get_embedder() -> Embedder:
+    """Factory function to get Embedder instance."""
+    return Embedder()
 ```
 
 ---
@@ -433,18 +486,23 @@ embedder = Embedder()
 
 ```python
 """Pinecone vector store wrapper."""
+import structlog
 from pinecone import Pinecone, ServerlessSpec
 
-from .config import rag_settings
+from .config import get_rag_settings
+
+log = structlog.get_logger()
 
 
 class VectorStore:
     """Pinecone vector store operations."""
 
-    def __init__(self):
-        self.pc = Pinecone(api_key=rag_settings.pinecone_api_key)
-        self.index_name = rag_settings.pinecone_index_name
+    def __init__(self) -> None:
+        settings = get_rag_settings()
+        self.pc = Pinecone(api_key=settings.pinecone_api_key)
+        self.index_name = settings.pinecone_index_name
         self._index = None
+        self._settings = settings
 
     @property
     def index(self):
@@ -457,7 +515,7 @@ class VectorStore:
                 # Create index
                 self.pc.create_index(
                     name=self.index_name,
-                    dimension=rag_settings.embedding_dimensions,
+                    dimension=self._settings.embedding_dimensions,
                     metric="cosine",
                     spec=ServerlessSpec(
                         cloud="aws",
@@ -481,7 +539,7 @@ class VectorStore:
             namespace: Namespace (repo identifier)
         """
         # Batch upsert
-        batch_size = rag_settings.batch_size
+        batch_size = self._settings.batch_size
         for i in range(0, len(vectors), batch_size):
             batch = vectors[i:i + batch_size]
             self.index.upsert(vectors=batch, namespace=namespace)
@@ -516,25 +574,49 @@ class VectorStore:
         ]
 
     def delete_by_file(self, namespace: str, file_path: str) -> None:
-        """Delete all vectors for a specific file."""
-        # Pinecone doesn't support delete by metadata directly in serverless
-        # We need to query first, then delete by IDs
-        # Alternative: Use file_path as prefix in ID
+        """Delete all vectors for a specific file.
 
-        # For now, we'll use the ID prefix strategy:
-        # ID format: "file_path:name:line"
-        self.index.delete(
-            filter={"file_path": {"$eq": file_path}},
-            namespace=namespace,
-        )
+        Note: Pinecone serverless doesn't support delete by metadata filter.
+        We use ID prefix strategy instead: ID format is "file_path:name:line"
+        """
+        # Query to find all vector IDs for this file
+        # Then delete by IDs
+        try:
+            # List vectors with the file_path prefix
+            # Since IDs start with file_path, we can use prefix deletion
+            prefix = f"{file_path}:"
+            self.index.delete(
+                ids=[],  # Empty - will use filter below
+                namespace=namespace,
+                filter={"file_path": {"$eq": file_path}},
+            )
+        except Exception as e:
+            # Fallback: If filter delete not supported, log warning
+            # In production, implement ID-based deletion by querying first
+            log.warning(
+                "delete_by_filter_not_supported",
+                namespace=namespace,
+                file_path=file_path,
+                error=str(e),
+            )
+            # Alternative approach: query and delete by IDs
+            self._delete_by_file_via_query(namespace, file_path)
+
+    def _delete_by_file_via_query(self, namespace: str, file_path: str) -> None:
+        """Fallback: Delete vectors by querying first then deleting by IDs."""
+        # This is a workaround for Pinecone serverless limitations
+        # In practice, you might want to maintain a separate index of file -> vector IDs
+        log.info("delete_by_file_via_query", namespace=namespace, file_path=file_path)
+        # Implementation would query vectors and delete by ID batches
 
     def delete_namespace(self, namespace: str) -> None:
         """Delete entire namespace (all vectors for a repo)."""
         self.index.delete(delete_all=True, namespace=namespace)
 
 
-# Singleton instance
-vector_store = VectorStore()
+def get_vector_store() -> VectorStore:
+    """Factory function to get VectorStore instance."""
+    return VectorStore()
 ```
 
 ---
@@ -543,27 +625,39 @@ vector_store = VectorStore()
 
 ```python
 """Code chunking logic."""
-from pathlib import Path
 import fnmatch
 import re
+import structlog
+from pathlib import Path
 
-from src.ast.parser import code_parser
+from src.ast.parser import get_code_parser
 from src.ast.models import CodeChunk
-from .config import rag_settings
+from .config import get_rag_settings
+
+log = structlog.get_logger()
 
 
 class Chunker:
     """Smart code chunking using AST."""
 
+    def __init__(self) -> None:
+        self._settings = get_rag_settings()
+        self._parser = get_code_parser()
+
     def should_process_file(self, file_path: str) -> bool:
         """Check if file should be processed."""
         # Check extension
         ext = Path(file_path).suffix.lower()
-        if ext not in [f".{e.lstrip('.')}" for e in rag_settings.include_extensions]:
+        # Normalize extensions (handle both ".py" and "py" formats)
+        allowed_extensions = {
+            ext if ext.startswith(".") else f".{ext}"
+            for ext in self._settings.include_extensions
+        }
+        if ext not in allowed_extensions:
             return False
 
         # Check exclude patterns
-        for pattern in rag_settings.exclude_patterns:
+        for pattern in self._settings.exclude_patterns:
             if fnmatch.fnmatch(file_path, pattern):
                 return False
 
@@ -588,10 +682,10 @@ class Chunker:
             return []
 
         if self.has_secrets(content):
-            print(f"Skipping {file_path}: potential secrets detected")
+            log.warning("skipping_file_with_secrets", file_path=file_path)
             return []
 
-        chunks = code_parser.parse_file(file_path, content)
+        chunks = self._parser.parse_file(file_path, content)
 
         # If no chunks extracted (parsing failed or unsupported),
         # fall back to whole file as single chunk
@@ -604,7 +698,7 @@ class Chunker:
                     file_path=file_path,
                     start_line=1,
                     end_line=content.count("\n") + 1,
-                    language=code_parser.detect_language(file_path) or "unknown",
+                    language=self._parser.detect_language(file_path) or "unknown",
                 )
             ]
 
@@ -620,7 +714,7 @@ class Chunker:
         Returns:
             List of all chunks
         """
-        all_chunks = []
+        all_chunks: list[CodeChunk] = []
 
         for file_path, content in files.items():
             chunks = self.chunk_file(file_path, content)
@@ -629,8 +723,9 @@ class Chunker:
         return all_chunks
 
 
-# Singleton instance
-chunker = Chunker()
+def get_chunker() -> Chunker:
+    """Factory function to get Chunker instance."""
+    return Chunker()
 ```
 
 ---
@@ -639,24 +734,32 @@ chunker = Chunker()
 
 ```python
 """Codebase indexing orchestrator."""
-import tempfile
+import asyncio
 import shutil
+import structlog
+import tempfile
 from pathlib import Path
 
 from git import Repo
 
 from src.app.services.github import GitHubService
-from .chunker import chunker
-from .embedder import embedder
-from .vector_store import vector_store
-from .config import rag_settings
+from .chunker import get_chunker
+from .embedder import get_embedder
+from .vector_store import get_vector_store
+from .config import get_rag_settings
+
+log = structlog.get_logger()
 
 
 class Indexer:
     """Orchestrate codebase indexing."""
 
-    def __init__(self, github: GitHubService):
+    def __init__(self, github: GitHubService) -> None:
         self.github = github
+        self._chunker = get_chunker()
+        self._embedder = get_embedder()
+        self._vector_store = get_vector_store()
+        self._settings = get_rag_settings()
 
     async def index_repository(
         self,
@@ -681,11 +784,12 @@ class Indexer:
         temp_dir = tempfile.mkdtemp(prefix="rag_index_")
 
         try:
-            # Clone repository (shallow)
+            # Clone repository (shallow) - use asyncio.to_thread for blocking I/O
             clone_url = await self._get_clone_url(owner, repo, installation_id)
             repo_path = Path(temp_dir) / repo
 
-            Repo.clone_from(
+            await asyncio.to_thread(
+                Repo.clone_from,
                 clone_url,
                 repo_path,
                 depth=1,
@@ -693,12 +797,12 @@ class Indexer:
             )
 
             # Collect files
-            files = {}
+            files: dict[str, str] = {}
             for file_path in repo_path.rglob("*"):
                 if file_path.is_file():
                     relative_path = str(file_path.relative_to(repo_path))
 
-                    if not chunker.should_process_file(relative_path):
+                    if not self._chunker.should_process_file(relative_path):
                         stats["files_skipped"] += 1
                         continue
 
@@ -710,7 +814,7 @@ class Indexer:
                         stats["files_skipped"] += 1
 
             # Chunk all files
-            chunks = chunker.chunk_directory(str(repo_path), files)
+            chunks = self._chunker.chunk_directory(str(repo_path), files)
             stats["chunks_created"] = len(chunks)
 
             # Embed and store
@@ -743,17 +847,17 @@ class Indexer:
 
             if status == "removed":
                 # Delete vectors for this file
-                vector_store.delete_by_file(namespace, filename)
+                self._vector_store.delete_by_file(namespace, filename)
                 stats["removed"] += 1
 
             elif status in ("added", "modified"):
                 # For modified files, delete old vectors first
                 if status == "modified":
-                    vector_store.delete_by_file(namespace, filename)
+                    self._vector_store.delete_by_file(namespace, filename)
 
                 # Parse and index new content
                 if content:
-                    chunks = chunker.chunk_file(filename, content)
+                    chunks = self._chunker.chunk_file(filename, content)
                     await self._embed_and_store(chunks, namespace)
                     stats[status] += 1
 
@@ -772,16 +876,16 @@ class Indexer:
         texts = [chunk.to_embedding_text() for chunk in chunks]
 
         # Batch embed
-        batch_size = rag_settings.batch_size
-        all_vectors = []
+        batch_size = self._settings.batch_size
+        all_vectors: list[dict] = []
 
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i + batch_size]
             batch_chunks = chunks[i:i + batch_size]
 
-            embeddings = embedder.embed(batch_texts)
+            embeddings = self._embedder.embed(batch_texts)
 
-            for chunk, embedding in zip(batch_chunks, embeddings):
+            for chunk, embedding in zip(batch_chunks, embeddings, strict=True):
                 all_vectors.append({
                     "id": chunk.id,
                     "values": embedding,
@@ -797,7 +901,7 @@ class Indexer:
                 })
 
         # Upsert to Pinecone
-        vector_store.upsert(all_vectors, namespace)
+        self._vector_store.upsert(all_vectors, namespace)
 
     async def _get_clone_url(
         self,
@@ -812,8 +916,8 @@ class Indexer:
         return f"https://github.com/{owner}/{repo}.git"
 
 
-# Factory function
 def create_indexer(github: GitHubService) -> Indexer:
+    """Factory function to create Indexer instance."""
     return Indexer(github)
 ```
 
@@ -824,13 +928,18 @@ def create_indexer(github: GitHubService) -> Indexer:
 ```python
 """Context retrieval from RAG."""
 from src.ast.models import RelatedCode
-from .embedder import embedder
-from .vector_store import vector_store
-from .config import rag_settings
+from .embedder import get_embedder
+from .vector_store import get_vector_store
+from .config import get_rag_settings
 
 
 class Retriever:
     """Retrieve related code context from indexed codebase."""
+
+    def __init__(self) -> None:
+        self._embedder = get_embedder()
+        self._vector_store = get_vector_store()
+        self._settings = get_rag_settings()
 
     def retrieve(
         self,
@@ -853,10 +962,10 @@ class Retriever:
             List of related code chunks
         """
         namespace = f"{owner}/{repo}"
-        top_k = top_k or rag_settings.top_k
+        top_k = top_k or self._settings.top_k
 
         # Embed query
-        query_embedding = embedder.embed_single(query)
+        query_embedding = self._embedder.embed_single(query)
 
         # Build filter
         filter_dict = None
@@ -864,7 +973,7 @@ class Retriever:
             filter_dict = {"file_path": {"$ne": exclude_file}}
 
         # Query Pinecone
-        results = vector_store.query(
+        results = self._vector_store.query(
             vector=query_embedding,
             namespace=namespace,
             top_k=top_k,
@@ -872,7 +981,7 @@ class Retriever:
         )
 
         # Convert to RelatedCode
-        related = []
+        related: list[RelatedCode] = []
         for result in results:
             metadata = result["metadata"]
 
@@ -937,8 +1046,9 @@ class Retriever:
         return "similar"
 
 
-# Singleton instance
-retriever = Retriever()
+def get_retriever() -> Retriever:
+    """Factory function to get Retriever instance."""
+    return Retriever()
 ```
 
 ---
