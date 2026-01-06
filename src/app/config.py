@@ -22,14 +22,11 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
 
-    # Redis (Celery)
+    # Redis (for Celery and Cache)
     REDIS_URL: str
 
     # Database - Neon PostgreSQL
     DATABASE_URL: str | None = None
-
-    # Cache - Upstash Redis
-    UPSTASH_REDIS_URL: str | None = None
 
     # Config System
     CONFIG_CACHE_TTL: int = 300  # 5 minutes

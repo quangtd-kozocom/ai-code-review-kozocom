@@ -66,13 +66,13 @@ src/core/
 
 ### Components
 
-| Component | Responsibility |
-|-----------|----------------|
-| `ReviewerConfig` | Pydantic model với validation và helper methods |
-| `ConfigCache` | Redis caching với TTL |
-| `ConfigRepository` | CRUD operations cho PostgreSQL |
-| `ConfigLoader` | Load và parse .reviewer.yaml từ GitHub |
-| `ConfigService` | Orchestrate tất cả components |
+| Component          | Responsibility                                  |
+| ------------------ | ----------------------------------------------- |
+| `ReviewerConfig`   | Pydantic model với validation và helper methods |
+| `ConfigCache`      | Redis caching với TTL                           |
+| `ConfigRepository` | CRUD operations cho PostgreSQL                  |
+| `ConfigLoader`     | Load và parse .reviewer.yaml từ GitHub          |
+| `ConfigService`    | Orchestrate tất cả components                   |
 
 ## Cài đặt
 
@@ -84,8 +84,8 @@ Thêm vào `.env`:
 # PostgreSQL (Neon)
 DATABASE_URL=postgresql+asyncpg://user:pass@host/db
 
-# Redis (Upstash)
-UPSTASH_REDIS_URL=rediss://default:token@host:6379
+# Redis (for Celery and Cache - Upstash recommended)
+REDIS_URL=rediss://default:token@host:6379
 
 # Cache TTL (optional, default 300 seconds)
 CONFIG_CACHE_TTL=300
@@ -141,31 +141,31 @@ language: vi
 reviews:
   # Profile: chill (ít nghiêm ngặt), default, strict (rất nghiêm ngặt)
   profile: default
-  
+
   # Agents để chạy
   agents:
     - security
     - logic
     - style
-  
+
   # Confidence threshold (0.0 - 1.0)
   # Chỉ report issues với confidence >= threshold
   confidence_threshold: 0.7
-  
+
   # Số comments tối đa mỗi file
   max_comments_per_file: 10
-  
+
   # Hướng dẫn theo path
   path_instructions:
     - path: "src/api/**"
       instructions: "Kiểm tra authentication và rate limiting"
     - path: "**/*.test.ts"
       instructions: "Đảm bảo test coverage > 80%"
-  
+
   # Auto review settings
   auto_review:
     enabled: true
-    drafts: false  # Không review draft PRs
+    drafts: false # Không review draft PRs
     skip_keywords:
       - "[skip review]"
       - "[no review]"
@@ -195,11 +195,11 @@ chat:
 
 ### Profile Behaviors
 
-| Profile | Threshold | Max Comments | Mô tả |
-|---------|-----------|--------------|-------|
-| `chill` | 0.85 | 5 | Chỉ báo lỗi nghiêm trọng |
-| `default` | 0.70 | 10 | Cân bằng |
-| `strict` | 0.60 | 20 | Review kỹ lưỡng |
+| Profile   | Threshold | Max Comments | Mô tả                    |
+| --------- | --------- | ------------ | ------------------------ |
+| `chill`   | 0.85      | 5            | Chỉ báo lỗi nghiêm trọng |
+| `default` | 0.70      | 10           | Cân bằng                 |
+| `strict`  | 0.60      | 20           | Review kỹ lưỡng          |
 
 ### Sử dụng trong Code
 
@@ -242,13 +242,13 @@ if config.is_agent_enabled("security"):
 
 Hệ thống hỗ trợ glob patterns:
 
-| Pattern | Matches | Not Matches |
-|---------|---------|-------------|
-| `*.py` | `test.py` | `src/test.py` |
-| `src/*.py` | `src/main.py` | `src/sub/main.py` |
-| `src/**` | `src/a/b/c.py` | `test.py` |
-| `**/test/**` | `test/unit.py`, `src/test/e2e.py` | `testing/a.py` |
-| `**/*.test.ts` | `a.test.ts`, `src/b.test.ts` | `test.ts` |
+| Pattern        | Matches                           | Not Matches       |
+| -------------- | --------------------------------- | ----------------- |
+| `*.py`         | `test.py`                         | `src/test.py`     |
+| `src/*.py`     | `src/main.py`                     | `src/sub/main.py` |
+| `src/**`       | `src/a/b/c.py`                    | `test.py`         |
+| `**/test/**`   | `test/unit.py`, `src/test/e2e.py` | `testing/a.py`    |
+| `**/*.test.ts` | `a.test.ts`, `src/b.test.ts`      | `test.ts`         |
 
 ## Testing
 
@@ -268,11 +268,11 @@ uv run pytest tests/core/config/ --cov=src/core/config
 
 ### Test Files
 
-| File | Coverage |
-|------|----------|
+| File              | Coverage                                         |
+| ----------------- | ------------------------------------------------ |
 | `test_schemas.py` | Validation, glob patterns, profiles, auto-review |
-| `test_cache.py` | Redis operations, error handling |
-| `test_service.py` | Config resolution, fallbacks |
+| `test_cache.py`   | Redis operations, error handling                 |
+| `test_service.py` | Config resolution, fallbacks                     |
 
 ### Manual Testing
 

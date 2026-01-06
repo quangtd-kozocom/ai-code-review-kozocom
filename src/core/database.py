@@ -16,7 +16,7 @@ from sqlmodel import SQLModel
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-from .app.config import get_settings
+from ..app.config import get_settings
 
 log = structlog.get_logger()
 
@@ -47,6 +47,19 @@ def get_engine() -> AsyncEngine:
         db_url = settings.DATABASE_URL
         if db_url.startswith("postgresql://"):
             db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+
+        # Remove libpq-specific parameters not supported by asyncpg
+        # asyncpg has different parameter names (e.g., 'ssl' instead of 'sslmode')
+        unsupported_params = {"sslmode", "channel_binding", "connect_timeout", "application_name"}
+        if "?" in db_url:
+            from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+            parsed = urlparse(db_url)
+            query_params = parse_qs(parsed.query)
+            for param in unsupported_params:
+                query_params.pop(param, None)
+            new_query = urlencode(query_params, doseq=True)
+            db_url = urlunparse(parsed._replace(query=new_query))
 
         _engine = create_async_engine(
             db_url,

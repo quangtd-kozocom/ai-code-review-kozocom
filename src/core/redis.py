@@ -29,7 +29,7 @@ async def get_redis() -> Redis:
         Async Redis client.
 
     Raises:
-        RuntimeError: If UPSTASH_REDIS_URL not configured.
+        RuntimeError: If REDIS_URL not configured.
     """
     global _redis
 
@@ -38,11 +38,11 @@ async def get_redis() -> Redis:
 
         settings = get_settings()
 
-        if not settings.UPSTASH_REDIS_URL:
-            raise RuntimeError("UPSTASH_REDIS_URL not configured")
+        if not settings.REDIS_URL:
+            raise RuntimeError("REDIS_URL not configured")
 
         _redis = from_url(
-            settings.UPSTASH_REDIS_URL,
+            settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
         )
@@ -64,4 +64,4 @@ async def close_redis() -> None:
 def is_redis_configured() -> bool:
     """Check if Redis cache is configured."""
     settings = get_settings()
-    return bool(settings.UPSTASH_REDIS_URL)
+    return bool(settings.REDIS_URL)

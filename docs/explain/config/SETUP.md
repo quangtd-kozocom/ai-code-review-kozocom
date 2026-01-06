@@ -23,11 +23,11 @@ Tạo hoặc update file `.env`:
 DATABASE_URL=postgresql+asyncpg://user:password@ep-xxx.region.aws.neon.tech/neondb?sslmode=require
 
 # ===========================================
-# Cache (Redis)
+# Redis (for Celery and Cache)
 # ===========================================
 # Format: rediss://default:token@host:port
 # Upstash example:
-UPSTASH_REDIS_URL=rediss://default:your-token@your-endpoint.upstash.io:6379
+REDIS_URL=rediss://default:your-token@your-endpoint.upstash.io:6379
 
 # ===========================================
 # Optional Settings
@@ -49,7 +49,7 @@ CONFIG_CACHE_TTL=300
 1. Đăng nhập [Upstash Console](https://console.upstash.com/)
 2. Tạo Redis database mới
 3. Vào tab **Details**
-4. Copy **Redis URL** (dạng `rediss://...`)
+4. Copy **Redis URL** (dạng `rediss://...`) vào `REDIS_URL`
 
 ## Step 2: Install Dependencies
 
@@ -144,10 +144,10 @@ from src.core.config import create_config_service
 
 async def test():
     service = await create_config_service()
-    
+
     # Get default config (no repo config exists)
     config = await service.get_config("test-owner", "test-repo")
-    
+
     print(f"Language: {config.language}")
     print(f"Profile: {config.reviews.profile}")
     print(f"Threshold: {config.get_threshold()}")
@@ -186,7 +186,7 @@ reviews:
     - style
   confidence_threshold: 0.6
   max_comments_per_file: 20
-  
+
   path_instructions:
     - path: "src/api/**"
       instructions: "Kiểm tra kỹ authentication và authorization"
@@ -194,7 +194,7 @@ reviews:
       instructions: "Review SQL injection vulnerabilities"
     - path: "**/*.test.ts"
       instructions: "Ensure test isolation and proper mocking"
-  
+
   auto_review:
     enabled: true
     drafts: false
@@ -257,11 +257,11 @@ psql "$DATABASE_URL" -c "SELECT 1"
 ### "Connection refused" - Redis
 
 ```bash
-# Check UPSTASH_REDIS_URL
-echo $UPSTASH_REDIS_URL
+# Check REDIS_URL
+echo $REDIS_URL
 
 # Test with redis-cli
-redis-cli -u "$UPSTASH_REDIS_URL" PING
+redis-cli -u "$REDIS_URL" PING
 ```
 
 **Fix**: Đảm bảo URL có prefix `rediss://` (với SSL) cho Upstash.
@@ -303,7 +303,7 @@ EOF
 ## Production Checklist
 
 - [ ] DATABASE_URL configured với SSL (`?sslmode=require`)
-- [ ] UPSTASH_REDIS_URL sử dụng `rediss://` (SSL)
+- [ ] REDIS_URL sử dụng `rediss://` (SSL) cho Upstash
 - [ ] Database tables created via migration
 - [ ] GitHub token có read access
 - [ ] Config cache TTL phù hợp (default 5 min)
