@@ -21,32 +21,13 @@ log = structlog.get_logger()
 
 
 class ConfigRepository:
-    """
-    Repository for config database operations.
-
-    Uses SQLModel for type-safe queries.
-    """
+    """Repository for config database operations."""
 
     def __init__(self, session: AsyncSession) -> None:
-        """
-        Initialize repository with database session.
-
-        Args:
-            session: Async SQLAlchemy session.
-        """
         self.session = session
 
     async def get(self, owner: str, repo: str) -> ConfigModel | None:
-        """
-        Get config by owner/repo.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-
-        Returns:
-            ConfigModel if found, None otherwise.
-        """
+        """Get config by owner/repo."""
         statement = select(ConfigModel).where(
             ConfigModel.owner == owner,
             ConfigModel.repo == repo,
@@ -55,27 +36,11 @@ class ConfigRepository:
         return result.scalar_one_or_none()
 
     async def get_by_id(self, config_id: int) -> ConfigModel | None:
-        """
-        Get config by ID.
-
-        Args:
-            config_id: Primary key ID.
-
-        Returns:
-            ConfigModel if found, None otherwise.
-        """
+        """Get config by ID."""
         return await self.session.get(ConfigModel, config_id)
 
     async def create(self, data: ConfigCreate) -> ConfigModel:
-        """
-        Create new config.
-
-        Args:
-            data: ConfigCreate schema.
-
-        Returns:
-            Created ConfigModel.
-        """
+        """Create new config."""
         config = ConfigModel(
             owner=data.owner,
             repo=data.repo,
@@ -96,50 +61,28 @@ class ConfigRepository:
         config_data: dict[str, Any],
         updated_by: str | None = None,
     ) -> ConfigModel:
-        """
-        Insert or update config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-            config_data: Config as dict.
-            updated_by: Username who made the change.
-
-        Returns:
-            Upserted ConfigModel.
-        """
+        """Insert or update config."""
         existing = await self.get(owner, repo)
 
         if existing:
-            # Update
             existing.config_data = config_data
             existing.updated_at = datetime.now(UTC)
             self.session.add(existing)
             await self.session.flush()
             log.info("Config updated", owner=owner, repo=repo)
             return existing
-        else:
-            # Create
-            return await self.create(
-                ConfigCreate(
-                    owner=owner,
-                    repo=repo,
-                    config_data=config_data,
-                    created_by=updated_by,
-                )
+
+        return await self.create(
+            ConfigCreate(
+                owner=owner,
+                repo=repo,
+                config_data=config_data,
+                created_by=updated_by,
             )
+        )
 
     async def delete(self, owner: str, repo: str) -> bool:
-        """
-        Delete config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-
-        Returns:
-            True if deleted, False if not found.
-        """
+        """Delete config, return True if deleted."""
         config = await self.get(owner, repo)
         if config:
             await self.session.delete(config)
@@ -149,15 +92,7 @@ class ConfigRepository:
         return False
 
     async def list_all(self, limit: int = 100) -> list[ConfigModel]:
-        """
-        List all configs (admin use).
-
-        Args:
-            limit: Maximum results.
-
-        Returns:
-            List of ConfigModel.
-        """
+        """List all configs with optional limit."""
         statement = select(ConfigModel).limit(limit)
         result = await self.session.execute(statement)
         return list(result.scalars().all())

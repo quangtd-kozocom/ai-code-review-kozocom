@@ -23,19 +23,7 @@ log = structlog.get_logger()
 
 
 class ConfigService:
-    """
-    Service for loading and managing repository configuration.
-
-    Resolution order:
-    1. Redis cache (5 min TTL)
-    2. .reviewer.yaml from GitHub
-    3. Database stored config
-    4. Default values
-
-    Usage:
-        service = ConfigService(github, cache, repository)
-        config = await service.get_config("owner", "repo")
-    """
+    """Service for loading and managing repository configuration."""
 
     def __init__(
         self,
@@ -43,14 +31,6 @@ class ConfigService:
         cache: ConfigCache | None = None,
         repository: ConfigRepository | None = None,
     ) -> None:
-        """
-        Initialize ConfigService.
-
-        Args:
-            github: GitHubService for loading .reviewer.yaml.
-            cache: Optional ConfigCache for Redis caching.
-            repository: Optional ConfigRepository for database fallback.
-        """
         self.github = github
         self.cache = cache
         self.repository = repository
@@ -62,24 +42,7 @@ class ConfigService:
         repo: str,
         ref: str = "HEAD",
     ) -> ReviewerConfig:
-        """
-        Get configuration for a repository.
-
-        Resolution order:
-        1. Redis cache
-        2. .reviewer.yaml from GitHub
-        3. Database config
-        4. Default values
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-            ref: Git ref to read config from.
-
-        Returns:
-            ReviewerConfig with resolved settings.
-        """
-        # 1. Check cache
+        """Get config: cache → GitHub → database → defaults."""
         if self.cache:
             try:
                 cached = await self.cache.get(owner, repo)
@@ -89,22 +52,17 @@ class ConfigService:
             except Exception as e:
                 log.warning("Cache read failed", error=str(e))
 
-        # 2. Try loading from .reviewer.yaml
         config_dict = await self.loader.load(owner, repo, ref)
 
-        # 3. Fallback to database
         if config_dict is None:
             config_dict = await self._load_from_db(owner, repo)
 
-        # 4. Fallback to defaults
         if config_dict is None:
             log.info("Using default config", owner=owner, repo=repo)
             config_dict = {}
 
-        # Validate through Pydantic
         config = ReviewerConfig(**config_dict)
 
-        # Cache the result
         if self.cache:
             try:
                 await self.cache.set(owner, repo, config.model_dump())
@@ -143,25 +101,11 @@ class ConfigService:
         config: ReviewerConfig,
         created_by: str | None = None,
     ) -> ConfigModel | None:
-        """
-        Save config to database.
-
-        Use for setting defaults via API.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-            config: Config to save.
-            created_by: Username making the change.
-
-        Returns:
-            Saved ConfigModel, or None if no repository configured.
-        """
+        """Save config to database, invalidate cache."""
         if not self.repository:
             log.warning("Cannot save config: no repository configured")
             return None
 
-        # Upsert to database
         db_config = await self.repository.upsert(
             owner=owner,
             repo=repo,
@@ -169,7 +113,6 @@ class ConfigService:
             updated_by=created_by,
         )
 
-        # Invalidate cache
         if self.cache:
             await self.cache.delete(owner, repo)
 
@@ -177,16 +120,7 @@ class ConfigService:
         return db_config
 
     async def delete_config(self, owner: str, repo: str) -> bool:
-        """
-        Delete stored config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-
-        Returns:
-            True if deleted.
-        """
+        """Delete stored config from database and cache."""
         deleted = False
 
         if self.repository:
@@ -198,13 +132,7 @@ class ConfigService:
         return deleted
 
     async def invalidate_cache(self, owner: str, repo: str) -> None:
-        """
-        Invalidate cached config.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-        """
+        """Invalidate cached config."""
         if self.cache:
             await self.cache.delete(owner, repo)
             log.debug("Cache invalidated", owner=owner, repo=repo)
@@ -216,25 +144,10 @@ async def create_config_service(
     with_cache: bool = True,
     with_database: bool = True,
 ) -> ConfigService:
-    """
-    Create ConfigService with all dependencies.
-
-    Factory function for creating ConfigService with optional
-    cache and database support. Gracefully degrades if services
-    are not configured.
-
-    Args:
-        github: GitHubService instance.
-        with_cache: Whether to enable Redis caching.
-        with_database: Whether to enable database fallback.
-
-    Returns:
-        Configured ConfigService instance.
-    """
+    """Create ConfigService with optional cache and database support."""
     cache: ConfigCache | None = None
     repository: ConfigRepository | None = None
 
-    # Setup cache if configured
     if with_cache:
         try:
             from ..redis import get_redis, is_redis_configured

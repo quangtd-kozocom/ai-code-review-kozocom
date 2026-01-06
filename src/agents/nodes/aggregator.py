@@ -1,9 +1,7 @@
-"""Aggregator node - combines and sorts comments.
+"""Aggregator node - combines, deduplicates, and limits review comments."""
 
-Uses repository configuration for:
-- max_comments_per_file limits
-- language-aware summary generation
-"""
+from collections import Counter, defaultdict
+from typing import Literal
 
 import structlog
 
@@ -12,100 +10,133 @@ from ..state import GraphState, ReviewComment
 
 log = structlog.get_logger()
 
-SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2, "suggestion": 3}
+type Severity = Literal["critical", "warning", "info", "suggestion"]
+
+_SEVERITY_PRIORITY: dict[str, int] = {
+    "critical": 0,
+    "warning": 1,
+    "info": 2,
+    "suggestion": 3,
+}
+
+_SUMMARY_TEMPLATES: dict[str, str] = {
+    "vi": (
+        "## 🤖 AI Code Review\n\n"
+        "| Mức độ | Số lượng |\n"
+        "|--------|----------|\n"
+        "| 🔴 Critical | {critical} |\n"
+        "| 🟡 Warning | {warning} |\n"
+        "| 🔵 Info | {info} |\n"
+        "| 💡 Suggestion | {suggestion} |\n\n"
+        "**Tổng cộng: {total} nhận xét**\n"
+    ),
+    "ja": (
+        "## 🤖 AI Code Review\n\n"
+        "| 深刻度 | 件数 |\n"
+        "|--------|------|\n"
+        "| 🔴 Critical | {critical} |\n"
+        "| 🟡 Warning | {warning} |\n"
+        "| 🔵 Info | {info} |\n"
+        "| 💡 Suggestion | {suggestion} |\n\n"
+        "**合計: {total} 件**\n"
+    ),
+    "en": (
+        "## 🤖 AI Code Review\n\n"
+        "| Severity | Count |\n"
+        "|----------|-------|\n"
+        "| 🔴 Critical | {critical} |\n"
+        "| 🟡 Warning | {warning} |\n"
+        "| 🔵 Info | {info} |\n"
+        "| 💡 Suggestion | {suggestion} |\n\n"
+        "**Total: {total} comments**\n"
+    ),
+}
 
 
-async def run(state: GraphState) -> dict:
-    """Aggregate, deduplicate, and limit comments with config-aware limits."""
-    # Get config (with defaults fallback)
-    config: ReviewerConfig = state.get("repo_config", ReviewerConfig())
-    max_per_file = config.get_max_comments()
+# =============================================================================
+# Comment Processing
+# =============================================================================
 
-    comments = state["comments"]
-    log.info("Aggregator started", total_comments=len(comments))
 
-    # Deduplicate by (file, line, category)
+def _deduplicate(comments: list[ReviewComment]) -> list[ReviewComment]:
+    """Remove duplicates by (file, line, category) key."""
     seen: set[tuple[str, int, str]] = set()
     unique: list[ReviewComment] = []
+
     for c in comments:
         key = (c.file, c.line, c.category)
         if key not in seen:
             seen.add(key)
             unique.append(c)
 
-    # Sort by severity, then confidence
-    unique.sort(key=lambda c: (SEVERITY_ORDER.get(c.severity, 99), -c.confidence))
+    return unique
 
-    # Limit per file
-    by_file: dict[str, list[ReviewComment]] = {}
-    for c in unique:
-        if c.file not in by_file:
-            by_file[c.file] = []
-        if len(by_file[c.file]) < max_per_file:
+
+def _sort_by_priority(comments: list[ReviewComment]) -> list[ReviewComment]:
+    """Sort by severity (critical first), then confidence (highest first)."""
+    return sorted(
+        comments,
+        key=lambda c: (_SEVERITY_PRIORITY.get(c.severity, 99), -c.confidence),
+    )
+
+
+def _limit_per_file(comments: list[ReviewComment], limit: int) -> list[ReviewComment]:
+    """Keep only top N comments per file (assumes already sorted by priority)."""
+    by_file: defaultdict[str, list[ReviewComment]] = defaultdict(list)
+
+    for c in comments:
+        if len(by_file[c.file]) < limit:
             by_file[c.file].append(c)
 
-    final: list[ReviewComment] = []
-    for file_comments in by_file.values():
-        final.extend(file_comments)
+    return [c for file_comments in by_file.values() for c in file_comments]
 
-    # Generate summary in configured language
-    summary = _generate_summary(final, config.language)
 
-    log.info(
-        "Aggregation complete",
-        total=len(final),
-        critical=sum(1 for c in final if c.severity == "critical"),
-    )
-    return {"final_comments": final, "summary": summary}
+# =============================================================================
+# Summary Generation
+# =============================================================================
 
 
 def _generate_summary(comments: list[ReviewComment], language: str) -> str:
-    """Generate summary in configured language."""
-    by_severity: dict[str, int] = {}
-    for c in comments:
-        by_severity.setdefault(c.severity, 0)
-        by_severity[c.severity] += 1
+    """Generate a markdown summary table in the specified language."""
+    counts = Counter(c.severity for c in comments)
+    template = _SUMMARY_TEMPLATES.get(language, _SUMMARY_TEMPLATES["en"])
 
-    critical = by_severity.get("critical", 0)
-    warning = by_severity.get("warning", 0)
-    info = by_severity.get("info", 0)
-    suggestion = by_severity.get("suggestion", 0)
+    return template.format(
+        critical=counts.get("critical", 0),
+        warning=counts.get("warning", 0),
+        info=counts.get("info", 0),
+        suggestion=counts.get("suggestion", 0),
+        total=len(comments),
+    )
 
-    if language == "vi":
-        return f"""## 🤖 AI Code Review
 
-| Mức độ | Số lượng |
-|--------|----------|
-| 🔴 Critical | {critical} |
-| 🟡 Warning | {warning} |
-| 🔵 Info | {info} |
-| 💡 Suggestion | {suggestion} |
+# =============================================================================
+# Main Node
+# =============================================================================
 
-**Tổng cộng: {len(comments)} nhận xét**
-"""
 
-    if language == "ja":
-        return f"""## 🤖 AI Code Review
+async def run(state: GraphState) -> dict:
+    """Aggregate comments: deduplicate, sort, limit, and generate summary."""
+    config: ReviewerConfig = state.get("repo_config", ReviewerConfig())
+    comments = state["comments"]
 
-| 深刻度 | 件数 |
-|--------|------|
-| 🔴 Critical | {critical} |
-| 🟡 Warning | {warning} |
-| 🔵 Info | {info} |
-| 💡 Suggestion | {suggestion} |
+    log.info("aggregator.started", total=len(comments))
 
-**合計: {len(comments)} 件**
-"""
+    # Process pipeline
+    unique = _deduplicate(comments)
+    sorted_comments = _sort_by_priority(unique)
+    final = _limit_per_file(sorted_comments, config.get_max_comments())
 
-    # Default: English
-    return f"""## 🤖 AI Code Review
+    # Generate summary
+    summary = _generate_summary(final, config.language)
 
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | {critical} |
-| 🟡 Warning | {warning} |
-| 🔵 Info | {info} |
-| 💡 Suggestion | {suggestion} |
+    # Log stats
+    counts = Counter(c.severity for c in final)
+    log.info(
+        "aggregator.completed",
+        total=len(final),
+        critical=counts.get("critical", 0),
+        deduplicated=len(comments) - len(unique),
+    )
 
-**Total: {len(comments)} comments**
-"""
+    return {"final_comments": final, "summary": summary}

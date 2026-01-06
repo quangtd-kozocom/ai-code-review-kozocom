@@ -28,15 +28,7 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
-    """
-    Get or create async engine.
-
-    Returns:
-        AsyncEngine configured for PostgreSQL.
-
-    Raises:
-        RuntimeError: If DATABASE_URL not configured.
-    """
+    """Get or create async PostgreSQL engine. Raises RuntimeError if DATABASE_URL not set."""
     global _engine
 
     if _engine is None:
@@ -91,16 +83,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession]:
-    """
-    Get database session as async context manager.
-
-    Usage:
-        async with get_session() as session:
-            # use session
-
-    Yields:
-        AsyncSession with auto-commit on success, rollback on error.
-    """
+    """Get database session with auto-commit on success, rollback on error."""
     factory = get_session_factory()
     async with factory() as session:
         try:
@@ -112,11 +95,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
 
 
 async def init_db() -> None:
-    """
-    Initialize database - create all tables.
-
-    Run this on app startup or via migration script.
-    """
+    """Initialize database - create all tables."""
     # Import models to register them with SQLModel.metadata
     from .config.models import ConfigModel  # noqa: F401
 

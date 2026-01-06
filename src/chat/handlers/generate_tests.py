@@ -22,7 +22,6 @@ class GenerateTestsCommandHandler(BaseCommandHandler):
             if not pr_files:
                 return ERROR_NO_FILES_FOUND
 
-            # Filter to testable files
             testable_files = [
                 {
                     "filename": f.get("filename", ""),
@@ -37,7 +36,6 @@ class GenerateTestsCommandHandler(BaseCommandHandler):
                 target_info = f" matching '{ctx.target}'" if ctx.target else ""
                 return ERROR_NO_MATCHING_FILES.format(target_info=target_info)
 
-            # Limit files and format diff
             testable_files = testable_files[:MAX_FILES_FOR_TEST_GENERATION]
             pr_diff = self._format_diff(testable_files)
 

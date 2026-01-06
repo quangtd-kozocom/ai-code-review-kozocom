@@ -60,11 +60,7 @@ def parse_command(body: str) -> ParsedCommand | None:
 
 def _is_valid_input(body: str) -> bool:
     """Validate input before processing."""
-    if not body or not isinstance(body, str):
-        return False
-    if len(body) > MAX_COMMENT_LENGTH:
-        return False
-    return True
+    return bool(body) and isinstance(body, str) and len(body) <= MAX_COMMENT_LENGTH
 
 
 def _match_command(body: str) -> ParsedCommand:

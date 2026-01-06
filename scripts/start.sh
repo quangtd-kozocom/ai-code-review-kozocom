@@ -22,7 +22,7 @@ NC='\033[0m' # No Color
 # Config
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NGROK_DOMAIN="national-kit-poorly.ngrok-free.app"
-API_PORT=8000
+API_PORT=9000
 TMUX_SESSION="ai-reviewer"
 
 # PID files

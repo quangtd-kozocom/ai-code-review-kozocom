@@ -21,17 +21,9 @@ CONFIG_FILENAME_ALT = ".reviewer.yml"
 
 
 class ConfigLoader:
-    """
-    Load .reviewer.yaml from GitHub repository.
-    """
+    """Load .reviewer.yaml from GitHub repository."""
 
     def __init__(self, github: GitHubService) -> None:
-        """
-        Initialize loader with GitHub service.
-
-        Args:
-            github: GitHubService instance for API calls.
-        """
         self.github = github
 
     async def load(
@@ -40,23 +32,9 @@ class ConfigLoader:
         repo: str,
         ref: str = "HEAD",
     ) -> dict[str, Any] | None:
-        """
-        Load and parse .reviewer.yaml from repository.
-
-        Tries .reviewer.yaml first, then .reviewer.yml as fallback.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-            ref: Git reference (branch/commit/tag).
-
-        Returns:
-            Parsed config dict, or None if file doesn't exist.
-        """
-        # Try primary filename
+        """Load and parse .reviewer.yaml, trying .yml as fallback."""
         content = await self._try_load_file(owner, repo, CONFIG_FILENAME, ref)
 
-        # Try alternative filename
         if content is None:
             content = await self._try_load_file(owner, repo, CONFIG_FILENAME_ALT, ref)
 
@@ -69,7 +47,6 @@ class ConfigLoader:
             )
             return None
 
-        # Parse YAML
         try:
             data = yaml.safe_load(content)
 
@@ -104,18 +81,7 @@ class ConfigLoader:
         filename: str,
         ref: str,
     ) -> str | None:
-        """
-        Try to load a specific config file.
-
-        Args:
-            owner: Repository owner.
-            repo: Repository name.
-            filename: Config filename to try.
-            ref: Git reference.
-
-        Returns:
-            File content as string, or None if not found.
-        """
+        """Try to load a specific config file, return None if not found."""
         try:
             content = await self.github.get_file_raw(owner, repo, filename, ref)
             return content
