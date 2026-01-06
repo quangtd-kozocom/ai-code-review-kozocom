@@ -36,7 +36,7 @@ __all__ = [
 # LLM Configuration
 # =============================================================================
 DEFAULT_LLM_TEMPERATURE: float = 0.1
-DEFAULT_LLM_MAX_TOKENS: int = 4096
+DEFAULT_LLM_MAX_TOKENS: int = 65536
 
 # =============================================================================
 # Database Configuration
