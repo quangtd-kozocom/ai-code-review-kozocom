@@ -49,6 +49,8 @@ Khi review code, LLM chỉ nhìn thấy **diff của file đang thay đổi**. N
 │           │   │   file: "src/utils.py"                  │           │
 │           │   │   lines: 10-12                          │           │
 │           │   │   signature: "def calculate_total(...)" │           │
+│           │   │   imports: ["typing", "models"]  ← v2   │           │
+│           │   │   calls: ["sum", "get_price"]    ← v2   │           │
 │           │   └─────────────────────────────────────────┘           │
 │           │                                                          │
 │           ├── Gọi OpenAI để tạo embedding (vector 1024 chiều)       │
@@ -285,45 +287,109 @@ Khi review code, LLM chỉ nhìn thấy **diff của file đang thay đổi**. N
 
 ---
 
-### 5. Retriever (`src/rag/retriever.py`)
+### 5. Retriever (`src/rag/retriever.py`) - **RAG v2**
 
-**Mục đích:** Tìm code liên quan và phân loại relationship
+**Mục đích:** Tìm code liên quan qua **explicit relationships** (không dùng semantic similarity)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                       RETRIEVER                                   │
+│                    RETRIEVER (v2)                                │
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                   │
 │  INPUT: Function đang review                                     │
 │  "calculate_total" từ file "src/order.py"                        │
 │                           │                                       │
 │                           ↓                                       │
-│  Query Pinecone (exclude current file)                           │
+│  3 loại query song song:                                         │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 1. FIND TEST                                                │ │
+│  │    Plugin.get_test_patterns("src/order.py")                 │ │
+│  │    → ["tests/test_order.py", "test_order.py"]               │ │
+│  │    Query: file_path = "tests/test_order.py"                 │ │
+│  │    Match: name chứa "calculate_total"                       │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 2. FIND CALLERS (ai gọi function này?)                      │ │
+│  │    Query: calls.$in = ["calculate_total"]                   │ │
+│  │    → Functions có "calculate_total" trong metadata.calls    │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 3. FIND CALLEES (function này gọi ai?)                      │ │
+│  │    Get: calculate_total.calls = ["get_items", "validate"]   │ │
+│  │    Query: name = "get_items" ∪ name = "validate"            │ │
+│  │    → Definitions của các functions được gọi                 │ │
+│  └─────────────────────────────────────────────────────────────┘ │
 │                           │                                       │
 │                           ↓                                       │
-│  OUTPUT: Related code with relationship                          │
+│  OUTPUT: Related code với explicit relationship                  │
 │                                                                   │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │ RelatedCode #1                                              │ │
 │  │   file: "tests/test_order.py"                               │ │
 │  │   name: "test_calculate_total"                              │ │
-│  │   relationship: "test"       ← Vì path chứa "test"          │ │
-│  │   score: 0.92                                               │ │
-│  │   content: "def test_calculate_total(): ..."                │ │
+│  │   relationship: "test"        ← Pattern matching            │ │
+│  │   score: 1.0                  ← Explicit = luôn 1.0         │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                                                                   │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │ RelatedCode #2                                              │ │
-│  │   file: "src/billing.py"                                    │ │
-│  │   name: "compute_total"                                     │ │
-│  │   relationship: "similar"    ← Logic tương tự               │ │
-│  │   score: 0.85                                               │ │
+│  │   file: "src/api/routes.py"                                 │ │
+│  │   name: "checkout_handler"                                  │ │
+│  │   relationship: "caller"      ← Nó GỌI calculate_total     │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                                                                   │
-│  Relationship Types:                                             │
-│  • "test"   - File test cho function này                        │
-│  • "callee" - Function đang được gọi                            │
-│  • "similar"- Code có logic tương tự                            │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ RelatedCode #3                                              │ │
+│  │   file: "src/models/item.py"                                │ │
+│  │   name: "get_items"                                         │ │
+│  │   relationship: "callee"      ← calculate_total GỌI nó     │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ─────────────────────────────────────────────────────────────── │
+│  Relationship Types (v2 - EXPLICIT ONLY):                        │
+│  • "test"   - Test file/function (via naming patterns)          │
+│  • "caller" - Functions that CALL this function                 │
+│  • "callee" - Functions THIS function CALLS                     │
+│                                                                   │
+│  ❌ Không còn "similar" - tránh noise từ semantic similarity    │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 6. Language Plugins (`src/languages/`) - **NEW in v2**
+
+**Mục đích:** Parse imports và calls cho từng ngôn ngữ
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    LANGUAGE PLUGINS                              │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Mỗi plugin implement:                                           │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ class PythonPlugin(LanguagePlugin):                         │ │
+│  │   def parse_imports(content) → ["os", "typing"]             │ │
+│  │   def parse_calls(content) → ["helper", "validate"]         │ │
+│  │   def get_test_patterns(path) → ["tests/test_*.py"]         │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  Supported Languages:                                            │
+│  ┌────────────┬───────────────┬────────────────────────────────┐ │
+│  │ Plugin     │ Extensions    │ Test Patterns                  │ │
+│  ├────────────┼───────────────┼────────────────────────────────┤ │
+│  │ Python     │ .py           │ tests/test_*.py, test_*.py     │ │
+│  │ JavaScript │ .js .jsx .ts  │ __tests__/*.test.js, *.spec.js │ │
+│  │ PHP        │ .php          │ tests/*Test.php                │ │
+│  └────────────┴───────────────┴────────────────────────────────┘ │
+│                                                                   │
+│  Call Detection Examples:                                        │
+│  ───────────────────────                                         │
+│  Python:  ast.walk() → find Call nodes                          │
+│  JS/TS:   tree-sitter → find call_expression nodes              │
+│  PHP:     regex patterns cho $obj->method(), Class::method()    │
 │                                                                   │
 └──────────────────────────────────────────────────────────────────┘
 ```

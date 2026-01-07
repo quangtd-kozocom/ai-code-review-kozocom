@@ -16,10 +16,14 @@ class CodeChunk:
     end_line: int
     language: str
 
-    # Optional
+    # Optional metadata
     signature: str | None = None
     docstring: str | None = None
     dependencies: list[str] = field(default_factory=list)
+
+    # Relationship data for RAG v2
+    imports: list[str] = field(default_factory=list)  # File-level imports
+    calls: list[str] = field(default_factory=list)  # Function calls in this chunk
 
     @property
     def id(self) -> str:

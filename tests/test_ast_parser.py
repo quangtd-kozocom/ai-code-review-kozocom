@@ -1,6 +1,5 @@
 """Tests for AST parser module."""
 
-
 from src.ast.models import CodeChunk
 from src.ast.parser import get_code_parser
 
@@ -21,10 +20,14 @@ class TestCodeParser:
         assert parser.detect_language("test.jsx") == "javascript"
 
     def test_detect_language_typescript(self):
-        """Test TypeScript language detection."""
+        """Test TypeScript language detection.
+
+        Note: With language plugins, TS/TSX use 'javascript' tree-sitter grammar.
+        """
         parser = get_code_parser()
-        assert parser.detect_language("test.ts") == "typescript"
-        assert parser.detect_language("test.tsx") == "tsx"
+        # TS/TSX files are handled by the JavaScript plugin
+        assert parser.detect_language("test.ts") == "javascript"
+        assert parser.detect_language("test.tsx") == "javascript"
 
     def test_detect_language_unsupported(self):
         """Test unsupported file types return None."""
@@ -140,3 +143,94 @@ class TestCodeChunk:
         assert "Signature: def calculate(x, y):" in text
         assert "Docstring: Add two numbers." in text
         assert "Code:" in text
+
+
+class TestParseResult:
+    """Tests for ParseResult from refactored parser."""
+
+    def test_parse_returns_result(self):
+        """Test parse method returns ParseResult."""
+        from src.ast.parser import ParseResult
+
+        parser = get_code_parser()
+        content = """
+from src.utils import helper
+
+def calculate(x, y):
+    return helper(x) + y
+"""
+        result = parser.parse("test.py", content)
+
+        assert result is not None
+        assert isinstance(result, ParseResult)
+        assert len(result.chunks) >= 1
+        assert "src.utils" in result.imports
+
+    def test_parse_unsupported_returns_none(self):
+        """Test parse returns None for unsupported files."""
+        parser = get_code_parser()
+        result = parser.parse("README.md", "# Hello")
+        assert result is None
+
+
+class TestChunkRelationships:
+    """Tests for CodeChunk relationship fields (imports/calls)."""
+
+    def test_chunk_has_imports(self):
+        """Test chunks have imports from file."""
+        parser = get_code_parser()
+        content = """
+from src.models import User
+from src.utils import helper
+
+def get_user(user_id):
+    return User.get(user_id)
+"""
+        result = parser.parse("test.py", content)
+        assert result is not None
+
+        for chunk in result.chunks:
+            assert hasattr(chunk, "imports")
+            assert hasattr(chunk, "calls")
+            # All chunks should have file-level imports
+            assert chunk.imports == result.imports
+
+    def test_chunk_has_calls(self):
+        """Test function chunks have parsed calls."""
+        parser = get_code_parser()
+        content = """
+def process():
+    data = fetch_data()
+    result = transform(data)
+    save(result)
+"""
+        result = parser.parse("test.py", content)
+        assert result is not None
+        assert len(result.chunks) >= 1
+
+        func_chunk = result.chunks[0]
+        assert "fetch_data" in func_chunk.calls
+        assert "transform" in func_chunk.calls
+        assert "save" in func_chunk.calls
+
+    def test_chunk_excludes_builtins(self):
+        """Test calls exclude Python builtins."""
+        parser = get_code_parser()
+        content = """
+def example():
+    items = list(range(10))
+    print(len(items))
+    return str(sum(items))
+"""
+        result = parser.parse("test.py", content)
+        assert result is not None
+        assert len(result.chunks) >= 1
+
+        func_chunk = result.chunks[0]
+        # Builtins should be filtered out
+        assert "print" not in func_chunk.calls
+        assert "len" not in func_chunk.calls
+        assert "str" not in func_chunk.calls
+        assert "sum" not in func_chunk.calls
+        assert "list" not in func_chunk.calls
+        assert "range" not in func_chunk.calls

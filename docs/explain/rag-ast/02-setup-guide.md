@@ -155,26 +155,86 @@ git push origin main
 
 ### 3.1 Đảm bảo GitHub App có permissions
 
-Trong GitHub App settings, cần có:
+Trong GitHub App settings (https://github.com/settings/apps/YOUR-APP):
 
-- **Repository permissions:**
+**Repository permissions:**
 
-  - Contents: Read
-  - Pull requests: Read & Write
-  - Issues: Read & Write
+| Permission    | Level            | Tại sao cần?                          |
+| ------------- | ---------------- | ------------------------------------- |
+| Contents      | **Read**         | Clone repo để index, đọc file content |
+| Pull requests | **Read & Write** | Đọc PR files, viết review comments    |
+| Issues        | **Read & Write** | Đọc/trả lời issue comments            |
+| Metadata      | **Read**         | Lấy repo info (owner, name)           |
 
-- **Subscribe to events:**
-  - Installation
-  - Pull request
-  - Issue comment
-  - Pull request review comment
+### 3.2 Subscribe to Events (QUAN TRỌNG cho RAG!)
 
-### 3.2 Cài App vào repository
+Trong tab "Permissions & events" → "Subscribe to events":
 
-1. Vào GitHub App page
+| Event                              | Trigger                        | RAG Action                                    |
+| ---------------------------------- | ------------------------------ | --------------------------------------------- |
+| ✅ **Installation**                | Khi user cài App vào repo      | **Full Index** - Clone + index toàn bộ repo   |
+| ✅ **Push**                        | Khi có push vào main/master    | **Incremental Update** - Update changed files |
+| ✅ **Pull request**                | PR opened/reopened/synchronize | Review với RAG context                        |
+| ✅ **Pull request review comment** | Comment trên review            | Chat commands (@bot fix, explain)             |
+| ✅ **Issue comment**               | Comment trên PR                | Chat commands                                 |
+
+**⚠️ Nếu thiếu events:**
+
+```
+❌ Thiếu "Installation" → Repo không được index khi cài App
+❌ Thiếu "Push" → Index không update sau merge
+❌ Thiếu "Pull request" → PR không được review
+```
+
+### 3.3 Webhook URL Configuration
+
+1. Trong GitHub App settings → "Webhook"
+2. **Webhook URL**: `https://YOUR-DOMAIN/api/v1/webhooks/github`
+3. **Webhook secret**: Tạo secret và save vào `.env`:
+
+```bash
+# .env
+GITHUB_WEBHOOK_SECRET=your-webhook-secret-here
+```
+
+4. **Content type**: `application/json`
+5. **SSL verification**: Enable (nếu production)
+
+### 3.4 Verify Webhook Delivery
+
+Sau khi cài App, kiểm tra webhook có gửi đúng không:
+
+1. Vào GitHub App → "Advanced" → "Recent Deliveries"
+2. Tìm event `installation.created`
+3. Check:
+   - **Response**: `200 OK`
+   - **Payload**: Có `installation.id` và `repositories`
+
+```json
+{
+  "action": "created",
+  "installation": {
+    "id": 12345678,
+    "account": { "login": "your-username" }
+  },
+  "repositories": [
+    { "name": "rag-test-repo", "full_name": "your-username/rag-test-repo" }
+  ]
+}
+```
+
+### 3.5 Cài App vào repository
+
+1. Vào GitHub App page: `https://github.com/apps/YOUR-APP-NAME`
 2. Click "Install"
 3. Chọn repository `rag-test-repo`
 4. Confirm installation
+
+**Expected behavior sau khi cài:**
+
+- Webhook `installation.created` được gửi
+- Server nhận và queue Celery task `index_installation`
+- Repo được clone và index vào Pinecone
 
 ---
 
@@ -302,33 +362,37 @@ git push origin feature/add-percentage
 [info] context_extractor.rag_enrichment_complete enriched_count=1
 ```
 
-### 6.5 Kết quả mong đợi
+### 6.5 Kết quả mong đợi (RAG v2)
 
-LLM sẽ nhận được context:
+LLM sẽ nhận được context với **explicit relationships**:
 
-````
+```
 ## File: src/order.py
 
 ### Diff:
 + def calculate_percentage(items: list[Item], item_name: str) -> float:
++     total = calculate_total(items)  # Gọi function đã có
 +     ...
 
 ### Related Code from Codebase:
 
-**TEST**: `tests/test_order.py` - `test_calculate_total`
-```python
-def test_calculate_total():
-    items = [Item("Apple", 1.0, 3), ...]
-````
+**TEST** (tests/test_order.py): test_calculate_total
+  → Test function cho calculate_total
 
-**SIMILAR**: `src/order.py` - `calculate_total`
-
-```python
-def calculate_total(items: list[Item], discount: float = 0) -> float:
-    ...
+**CALLEE** (src/order.py): calculate_total
+  → Function mà calculate_percentage gọi
+  def calculate_total(items: list[Item], discount: float = 0) -> float:
+      ...
 ```
 
-```
+**Lưu ý RAG v2:**
+
+- Chỉ có 3 loại relationship: `TEST`, `CALLER`, `CALLEE`
+- Không có "SIMILAR" - tránh noise từ semantic similarity
+- Relationships được xác định qua:
+  - TEST: pattern matching (`tests/test_{name}.py`)
+  - CALLER: functions có `calculate_percentage` trong `calls` metadata
+  - CALLEE: functions mà `calculate_percentage` gọi (từ `calls` metadata)
 
 ---
 
@@ -345,7 +409,7 @@ Merge PR vào main branch.
 [info] PR merged - triggering RAG update pr=1 repo=your-username/rag-test-repo
 [info] Updated RAG index stats={'added': 0, 'modified': 1, 'removed': 0}
 
-````
+```
 
 ### 7.3 Verify
 
@@ -359,9 +423,10 @@ Merge PR vào main branch.
 ### RAG không hoạt động
 
 **Check 1: Pinecone configured?**
+
 ```bash
 uv run python -c "from src.rag.config import get_rag_settings; print(bool(get_rag_settings().pinecone_api_key))"
-````
+```
 
 Expected: `True`
 
@@ -387,6 +452,26 @@ print(store.describe_namespace('your-username/rag-test-repo'))
 1. File là `added` không phải `modified` → chỉ `modified` files được enrich
 2. Không có functions bị thay đổi → không query RAG
 3. Pinecone chưa có data → cần index trước
+4. **RAG v2**: Không có test file matching pattern
+5. **RAG v2**: Function không gọi hoặc được gọi bởi function khác nào
+
+**Check RAG v2 parsing:**
+
+```bash
+uv run python -c "
+from src.ast.parser import get_code_parser
+parser = get_code_parser()
+result = parser.parse('test.py', '''
+def calculate_percentage(items, item_name):
+    total = calculate_total(items)
+    return total * 100
+''')
+print('Imports:', result.imports)
+print('Calls:', result.chunks[0].calls if result.chunks else [])
+"
+```
+
+Expected: `Calls: ['calculate_total']`
 
 ### Celery task failed
 

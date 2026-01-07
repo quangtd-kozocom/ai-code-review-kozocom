@@ -124,6 +124,42 @@ class VectorStore:
         except Exception as e:
             log.warning("delete_namespace_failed", namespace=namespace, error=str(e))
 
+    def query_by_metadata(
+        self,
+        namespace: str,
+        filter: dict,
+        top_k: int = 10,
+    ) -> list[dict]:
+        """Query by metadata filter (without vector similarity).
+
+        This is used for explicit relationship lookups where we don't need
+        semantic similarity, just metadata matching.
+
+        Args:
+            namespace: Namespace to search in.
+            filter: Metadata filter dict.
+            top_k: Maximum number of results.
+
+        Returns:
+            List of matches with id, score, and metadata.
+        """
+        if self.pc is None:
+            return []
+        try:
+            # Use a zero vector for metadata-only queries
+            dummy = [0.0] * self._settings.embedding_dimensions
+            results = self.index.query(
+                namespace=namespace,
+                vector=dummy,
+                filter=filter,
+                top_k=top_k,
+                include_metadata=True,
+            )
+            return [{"id": m.id, "score": m.score, "metadata": m.metadata} for m in results.matches]
+        except Exception as e:
+            log.warning("query_by_metadata_failed", error=str(e))
+            return []
+
     def describe_namespace(self, namespace: str) -> dict:
         """Get stats for a namespace."""
         try:

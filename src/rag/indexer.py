@@ -198,6 +198,9 @@ class Indexer:
                             "start_line": chunk.start_line,
                             "end_line": chunk.end_line,
                             "language": chunk.language,
+                            # RAG v2: Relationship data
+                            "imports": chunk.imports,
+                            "calls": chunk.calls,
                         },
                     }
                 )
