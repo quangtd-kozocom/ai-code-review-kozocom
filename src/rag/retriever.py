@@ -8,6 +8,12 @@ Key improvements over v1:
 - Explicit relationship types for context quality
 - Test file discovery using naming conventions
 - Caller/callee detection using indexed function calls
+
+Refactored to use extracted helper classes for better maintainability:
+- CallParser: Parse function calls from code
+- CalleeResolver: Resolve calls to indexed definitions
+- CallerFinder: Find functions that call target
+- TestFinder: Find tests for source functions
 """
 
 import structlog
@@ -15,8 +21,9 @@ import structlog
 from src.ast.models import RelatedCode
 from src.languages import get_plugin_for_file
 
+from .call_resolution import CalleeResolver, CallerFinder, CallParser, TestFinder
 from .config import get_rag_settings
-from .vector_store import get_vector_store
+from .vector_store import VectorStore, get_vector_store
 
 log = structlog.get_logger()
 
@@ -31,11 +38,35 @@ class Retriever:
     - TEST: Test functions/files for the target
     - CALLER: Functions that call the target function
     - CALLEE: Functions that the target function calls
+
+    Uses dependency injection via constructor for better testability.
     """
 
-    def __init__(self) -> None:
-        self._store = get_vector_store()
+    def __init__(
+        self,
+        store: VectorStore | None = None,
+        call_parser: CallParser | None = None,
+        callee_resolver: CalleeResolver | None = None,
+        caller_finder: CallerFinder | None = None,
+        test_finder: TestFinder | None = None,
+    ) -> None:
+        """Initialize retriever with optional dependency injection.
+
+        Args:
+            store: Vector store instance (defaults to cached singleton).
+            call_parser: Call parser instance.
+            callee_resolver: Callee resolver instance.
+            caller_finder: Caller finder instance.
+            test_finder: Test finder instance.
+        """
+        self._store = store or get_vector_store()
         self._settings = get_rag_settings()
+
+        # Initialize helper components with the store
+        self._call_parser = call_parser or CallParser()
+        self._callee_resolver = callee_resolver or CalleeResolver(self._store)
+        self._caller_finder = caller_finder or CallerFinder(self._store)
+        self._test_finder = test_finder or TestFinder(self._store)
 
     def retrieve(
         self,
@@ -62,13 +93,13 @@ class Retriever:
         try:
             # 1. Find TEST
             if plugin:
-                test = self._find_test(namespace, file_path, function_name, plugin)
+                test = self._test_finder.find(namespace, file_path, function_name, plugin)
                 if test:
                     log.debug("retriever.found_test", func=function_name, test=test.name)
                     results.append(test)
 
             # 2. Find CALLERS (functions that call this function)
-            callers = self._find_callers(namespace, file_path, function_name)
+            callers = self._caller_finder.find(namespace, function_name, file_path)
             for c in callers[:2]:
                 log.debug(
                     "retriever.found_caller",
@@ -154,6 +185,51 @@ class Retriever:
 
         return results
 
+    def _find_callees(
+        self, namespace: str, file_path: str, function_name: str
+    ) -> list[RelatedCode]:
+        """Find functions that this function calls.
+
+        First retrieves the function to get its 'calls' list,
+        then finds definitions for those called functions.
+        """
+        # Get current function's calls from index
+        results = self._store.fetch_by_metadata(
+            namespace=namespace,
+            filter={"file_path": file_path, "name": function_name},
+            limit=1,
+        )
+
+        if not results:
+            return []
+
+        # Get metadata from result
+        match = results[0]
+        metadata = match.metadata if hasattr(match, "metadata") else match.get("metadata", {})
+
+        # Validate we got the exact function
+        if metadata.get("name") != function_name:
+            log.debug(
+                "retriever.callee_mismatch",
+                expected=function_name,
+                got=metadata.get("name"),
+            )
+            return []
+
+        calls = metadata.get("calls", [])
+        if not calls:
+            return []
+
+        # Resolve calls to definitions
+        resolved = self._callee_resolver.resolve(
+            namespace=namespace,
+            calls=calls,
+            current_file=file_path,
+            max_results=5,
+        )
+
+        return [r.to_related_code() for r in resolved]
+
     def _find_callees_from_content(
         self,
         owner: str,
@@ -163,87 +239,32 @@ class Retriever:
     ) -> list[RelatedCode]:
         """Find callees by parsing function content directly.
 
-        This is used for new functions that aren't in the index yet.
-        We parse their content to find function calls, then lookup
+        Used for new functions that aren't in the index yet.
+        Parses their content to find function calls, then looks up
         those functions in the index.
         """
         namespace = f"{owner}/{repo}"
-        plugin = get_plugin_for_file(file_path)
-        if not plugin:
-            return []
 
         # Parse calls from function content
-        calls = plugin.parse_calls(function_content)
+        calls = self._call_parser.parse(file_path, function_content)
         if not calls:
             return []
 
         log.debug(
             "retriever.parsed_calls_from_content",
             file=file_path,
-            calls=calls[:10],  # Log first 10
+            calls=calls[:10],
         )
 
-        # Lookup each called function in the index
-        # First try to find callees from OTHER files
-        callees = []
-        same_file_callees = []
+        # Resolve calls to definitions
+        resolved = self._callee_resolver.resolve(
+            namespace=namespace,
+            calls=calls,
+            current_file=file_path,
+            max_results=5,
+        )
 
-        for name in calls[:5]:  # Limit to 5 to reduce queries
-            # Try other files first
-            results = self._store.query_by_metadata(
-                namespace=namespace,
-                filter={"name": name, "file_path": {"$ne": file_path}},
-                top_k=1,
-            )
-            if results:
-                r = results[0]
-                result_name = r["metadata"].get("name", "")
-                if result_name == name:
-                    callees.append(
-                        RelatedCode(
-                            file_path=r["metadata"]["file_path"],
-                            name=r["metadata"]["name"],
-                            content=r["metadata"].get("content", ""),
-                            chunk_type=r["metadata"].get("chunk_type", "function"),
-                            relevance_score=1.0,
-                            relationship="callee",
-                            start_line=r["metadata"].get("start_line", 0),
-                            end_line=r["metadata"].get("end_line", 0),
-                        )
-                    )
-                    continue
-
-            # If not found in other files, check same file
-            results = self._store.query_by_metadata(
-                namespace=namespace,
-                filter={"name": name, "file_path": file_path},
-                top_k=1,
-            )
-            if results:
-                r = results[0]
-                result_name = r["metadata"].get("name", "")
-                if result_name == name:
-                    same_file_callees.append(
-                        RelatedCode(
-                            file_path=r["metadata"]["file_path"],
-                            name=r["metadata"]["name"],
-                            content=r["metadata"].get("content", ""),
-                            chunk_type=r["metadata"].get("chunk_type", "function"),
-                            relevance_score=0.9,  # Slightly lower relevance for same file
-                            relationship="callee",
-                            start_line=r["metadata"].get("start_line", 0),
-                            end_line=r["metadata"].get("end_line", 0),
-                        )
-                    )
-
-        # If no callees from other files, include same-file callees
-        if not callees and same_file_callees:
-            callees = same_file_callees[:2]  # Limit same-file callees
-            log.debug(
-                "retriever.using_same_file_callees",
-                file=file_path,
-                count=len(callees),
-            )
+        callees = [r.to_related_code() for r in resolved]
 
         log.info(
             "retriever.found_callees_from_content",
@@ -252,152 +273,10 @@ class Retriever:
         )
         return callees
 
-    def _find_test(
-        self, namespace: str, file_path: str, function_name: str, plugin
-    ) -> RelatedCode | None:
-        """Find test file/function using patterns.
 
-        Uses language-specific test patterns to find relevant tests.
-        """
-        test_paths = plugin.get_test_patterns(file_path)
-
-        for test_path in test_paths:
-            results = self._store.query_by_metadata(
-                namespace=namespace,
-                filter={"file_path": test_path},
-                top_k=10,
-            )
-            if not results:
-                continue
-
-            # Look for test function matching the source function
-            for r in results:
-                name = r["metadata"].get("name", "")
-                # Check if function name appears in test name
-                # e.g., test_calculate for function calculate
-                if function_name.lower() in name.lower():
-                    return RelatedCode(
-                        file_path=r["metadata"]["file_path"],
-                        name=name,
-                        content=r["metadata"].get("content", ""),
-                        chunk_type=r["metadata"].get("chunk_type", "function"),
-                        relevance_score=1.0,
-                        relationship="test",
-                        start_line=r["metadata"].get("start_line", 0),
-                        end_line=r["metadata"].get("end_line", 0),
-                    )
-        return None
-
-    def _find_callers(
-        self, namespace: str, file_path: str, function_name: str
-    ) -> list[RelatedCode]:
-        """Find functions that call this function.
-
-        Searches indexed metadata for functions that have this function
-        in their 'calls' list.
-        """
-        results = self._store.query_by_metadata(
-            namespace=namespace,
-            filter={
-                "calls": {"$in": [function_name]},
-                "file_path": {"$ne": file_path},
-            },
-            top_k=5,
-        )
-
-        # Validate results - Pinecone zero-vector queries may return noise
-        validated_callers = []
-        for r in results:
-            calls_list = r["metadata"].get("calls", [])
-            # Verify this function actually has the target in its calls list
-            if function_name not in calls_list:
-                log.debug(
-                    "retriever.caller_mismatch",
-                    caller=r["metadata"].get("name"),
-                    expected_call=function_name,
-                    actual_calls=calls_list,
-                )
-                continue
-
-            validated_callers.append(
-                RelatedCode(
-                    file_path=r["metadata"]["file_path"],
-                    name=r["metadata"]["name"],
-                    content=r["metadata"].get("content", ""),
-                    chunk_type=r["metadata"].get("chunk_type", "function"),
-                    relevance_score=1.0,
-                    relationship="caller",
-                    start_line=r["metadata"].get("start_line", 0),
-                    end_line=r["metadata"].get("end_line", 0),
-                )
-            )
-
-        return validated_callers
-
-    def _find_callees(
-        self, namespace: str, file_path: str, function_name: str
-    ) -> list[RelatedCode]:
-        """Find functions that this function calls.
-
-        First retrieves the function to get its 'calls' list,
-        then finds definitions for those called functions.
-        """
-        # Get current function's calls
-        current = self._store.query_by_metadata(
-            namespace=namespace,
-            filter={"file_path": file_path, "name": function_name},
-            top_k=1,
-        )
-        if not current:
-            return []
-
-        # Validate that we got the exact function we asked for
-        # (Pinecone zero-vector queries may return approximate matches)
-        if current[0]["metadata"].get("name") != function_name:
-            log.debug(
-                "retriever.callee_mismatch",
-                expected=function_name,
-                got=current[0]["metadata"].get("name"),
-            )
-            return []
-
-        called = current[0]["metadata"].get("calls", [])
-        if not called:
-            return []
-
-        callees = []
-        for name in called[:5]:  # Limit to 5 calls to reduce queries
-            results = self._store.query_by_metadata(
-                namespace=namespace,
-                filter={"name": name, "file_path": {"$ne": file_path}},
-                top_k=1,
-            )
-            if results:
-                r = results[0]
-                # Validate that the result name matches what we queried for
-                # This prevents noise from Pinecone's zero-vector similarity search
-                result_name = r["metadata"].get("name", "")
-                if result_name != name:
-                    log.debug(
-                        "retriever.callee_result_mismatch",
-                        expected=name,
-                        got=result_name,
-                    )
-                    continue
-
-                callees.append(
-                    RelatedCode(
-                        file_path=r["metadata"]["file_path"],
-                        name=r["metadata"]["name"],
-                        content=r["metadata"].get("content", ""),
-                        chunk_type=r["metadata"].get("chunk_type", "function"),
-                        relevance_score=1.0,
-                        relationship="callee",
-                        start_line=r["metadata"].get("start_line", 0),
-                        end_line=r["metadata"].get("end_line", 0),
-                    )
-                )
-        return callees
+# =============================================================================
+# Factory
+# =============================================================================
 
 
 def get_retriever() -> Retriever:

@@ -5,6 +5,7 @@ It extracts code chunks (functions, classes, methods) with their imports and cal
 """
 
 from dataclasses import dataclass
+from functools import cache
 
 import structlog
 import tree_sitter_language_pack as ts_pack
@@ -200,12 +201,12 @@ class CodeParser:
         )
 
 
-_parser: CodeParser | None = None
-
-
+@cache
 def get_code_parser() -> CodeParser:
-    """Factory function to get CodeParser instance."""
-    global _parser
-    if _parser is None:
-        _parser = CodeParser()
-    return _parser
+    """Factory function to get CodeParser instance (cached)."""
+    return CodeParser()
+
+
+def reset_code_parser() -> None:
+    """Reset the cached parser instance (for testing)."""
+    get_code_parser.cache_clear()

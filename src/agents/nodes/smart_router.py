@@ -146,7 +146,7 @@ async def run(state: GraphState) -> dict:
                 routing_decisions[f.filename] = ["security", "style", "logic"]
                 log.warning("router.missing_analysis", file=f.filename)
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.warning("router.timeout")
         for f in files_to_route:
             routing_decisions[f.filename] = ["security", "style", "logic"]

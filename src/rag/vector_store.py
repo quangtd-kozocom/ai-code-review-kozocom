@@ -1,4 +1,10 @@
-"""Pinecone vector store wrapper."""
+"""Pinecone vector store wrapper with proper metadata query support.
+
+Uses Pinecone's fetch_by_metadata API (2025-10) for pure metadata queries.
+"""
+
+from dataclasses import dataclass
+from functools import cache
 
 import structlog
 from pinecone import Pinecone, ServerlessSpec
@@ -8,49 +14,60 @@ from .config import get_rag_settings
 log = structlog.get_logger()
 
 
+@dataclass(frozen=True, slots=True)
+class VectorMatch:
+    """A match from vector store query."""
+
+    id: str
+    score: float
+    metadata: dict
+
+
 class VectorStore:
-    """Pinecone vector store operations."""
+    """Pinecone vector store operations with proper metadata query support.
+
+    Uses the fetch_by_metadata API (Pinecone 2025-10) for pure metadata queries.
+    """
 
     def __init__(self) -> None:
         settings = get_rag_settings()
         if not settings.pinecone_api_key:
             log.warning("pinecone_api_key_not_configured")
-            self.pc = None
+            self._pc = None
         else:
-            self.pc = Pinecone(api_key=settings.pinecone_api_key)
-        self.index_name = settings.pinecone_index_name
+            self._pc = Pinecone(api_key=settings.pinecone_api_key)
+        self._index_name = settings.pinecone_index_name
         self._index = None
         self._settings = settings
 
     @property
     def index(self):
         """Get or create Pinecone index."""
-        if self.pc is None:
+        if self._pc is None:
             raise RuntimeError("Pinecone client not configured. Set PINECONE_API_KEY.")
 
         if self._index is None:
-            # Check if index exists
-            existing_indexes = [idx.name for idx in self.pc.list_indexes()]
+            existing_indexes = [idx.name for idx in self._pc.list_indexes()]
 
-            if self.index_name not in existing_indexes:
-                # Create index
-                log.info("creating_pinecone_index", index_name=self.index_name)
-                self.pc.create_index(
-                    name=self.index_name,
+            if self._index_name not in existing_indexes:
+                log.info("creating_pinecone_index", index_name=self._index_name)
+                self._pc.create_index(
+                    name=self._index_name,
                     dimension=self._settings.embedding_dimensions,
                     metric="cosine",
                     spec=ServerlessSpec(cloud="aws", region="us-east-1"),
                 )
 
-            self._index = self.pc.Index(self.index_name)
+            self._index = self._pc.Index(self._index_name)
 
         return self._index
 
-    def upsert(
-        self,
-        vectors: list[dict],
-        namespace: str,
-    ) -> None:
+    @property
+    def is_configured(self) -> bool:
+        """Check if Pinecone is properly configured."""
+        return self._pc is not None
+
+    def upsert(self, vectors: list[dict], namespace: str) -> None:
         """Upsert vectors to index.
 
         Args:
@@ -60,7 +77,6 @@ class VectorStore:
         if not vectors:
             return
 
-        # Batch upsert
         batch_size = self._settings.batch_size
         for i in range(0, len(vectors), batch_size):
             batch = vectors[i : i + batch_size]
@@ -73,11 +89,17 @@ class VectorStore:
         namespace: str,
         top_k: int = 5,
         filter: dict | None = None,
-    ) -> list[dict]:
-        """Query similar vectors.
+    ) -> list[VectorMatch]:
+        """Query similar vectors using vector similarity.
+
+        Args:
+            vector: Query vector for similarity search.
+            namespace: Namespace to search in.
+            top_k: Maximum number of results.
+            filter: Optional metadata filter.
 
         Returns:
-            List of matches with scores and metadata
+            List of VectorMatch objects.
         """
         results = self.index.query(
             vector=vector,
@@ -88,19 +110,68 @@ class VectorStore:
         )
 
         return [
-            {
-                "id": match.id,
-                "score": match.score,
-                "metadata": match.metadata or {},
-            }
+            VectorMatch(
+                id=match.id,
+                score=match.score,
+                metadata=match.metadata or {},
+            )
             for match in results.matches
         ]
 
-    def delete_by_file(self, namespace: str, file_path: str) -> None:
-        """Delete all vectors for a specific file.
+    def fetch_by_metadata(
+        self,
+        namespace: str,
+        filter: dict,
+        limit: int = 10,
+    ) -> list[VectorMatch]:
+        """Fetch vectors by metadata filter (no vector required).
 
-        Note: Pinecone serverless supports delete by metadata filter.
+        Uses Pinecone's native fetch_by_metadata API (2025-10).
+
+        Args:
+            namespace: Namespace to search in.
+            filter: Metadata filter dict using Pinecone filter syntax.
+            limit: Maximum number of results.
+
+        Returns:
+            List of VectorMatch objects matching the filter.
         """
+        if self._pc is None:
+            return []
+
+        try:
+            response = self.index.fetch_by_metadata(
+                namespace=namespace,
+                filter=filter,
+                limit=limit,
+            )
+
+            # Response format: {"vectors": {"id-1": {...}, "id-2": {...}}, "namespace": "..."}
+            vectors_dict = response.get("vectors", {})
+
+            matches = [
+                VectorMatch(
+                    id=vec_id,
+                    score=1.0,  # fetch_by_metadata doesn't return scores
+                    metadata=vec_data.get("metadata", {}),
+                )
+                for vec_id, vec_data in vectors_dict.items()
+            ]
+
+            log.debug(
+                "fetch_by_metadata.success",
+                namespace=namespace,
+                filter=filter,
+                count=len(matches),
+            )
+            return matches
+
+        except Exception as e:
+            log.warning("fetch_by_metadata.failed", error=str(e), filter=filter)
+            return []
+
+    def delete_by_file(self, namespace: str, file_path: str) -> None:
+        """Delete all vectors for a specific file."""
         try:
             self.index.delete(
                 namespace=namespace,
@@ -108,7 +179,6 @@ class VectorStore:
             )
             log.info("deleted_vectors_for_file", namespace=namespace, file_path=file_path)
         except Exception as e:
-            # Fallback: Log warning and skip
             log.warning(
                 "delete_by_filter_failed",
                 namespace=namespace,
@@ -124,62 +194,6 @@ class VectorStore:
         except Exception as e:
             log.warning("delete_namespace_failed", namespace=namespace, error=str(e))
 
-    def query_by_metadata(
-        self,
-        namespace: str,
-        filter: dict,
-        top_k: int = 10,
-    ) -> list[dict]:
-        """Query by metadata filter (without vector similarity).
-
-        This is used for explicit relationship lookups where we don't need
-        semantic similarity, just metadata matching.
-
-        IMPORTANT: Pinecone doesn't support pure metadata queries. We use a
-        zero vector which may return unexpected results if the filter doesn't
-        match exactly. Callers MUST validate returned results match their filter.
-
-        Args:
-            namespace: Namespace to search in.
-            filter: Metadata filter dict.
-            top_k: Maximum number of results.
-
-        Returns:
-            List of matches with id, score, and metadata.
-        """
-        if self.pc is None:
-            return []
-        try:
-            # WARNING: Pinecone zero-vector queries may return approximate results.
-            # The filter is applied, but if no exact matches exist, Pinecone may
-            # still return results based on vector proximity to zero.
-            # Callers should validate that returned metadata matches their filter.
-            dummy = [0.0] * self._settings.embedding_dimensions
-            results = self.index.query(
-                namespace=namespace,
-                vector=dummy,
-                filter=filter,
-                top_k=top_k,
-                include_metadata=True,
-            )
-
-            matches = [{"id": m.id, "score": m.score, "metadata": m.metadata} for m in results.matches]
-
-            # Log debug info if results seem suspicious (low scores with zero vector)
-            if matches and all(m["score"] < 0.1 for m in matches):
-                log.debug(
-                    "query_by_metadata_low_scores",
-                    filter=filter,
-                    namespace=namespace,
-                    result_count=len(matches),
-                    hint="Results may not match filter - validate in caller",
-                )
-
-            return matches
-        except Exception as e:
-            log.warning("query_by_metadata_failed", error=str(e))
-            return []
-
     def describe_namespace(self, namespace: str) -> dict:
         """Get stats for a namespace."""
         try:
@@ -193,6 +207,12 @@ class VectorStore:
             return {"vector_count": 0}
 
 
+@cache
 def get_vector_store() -> VectorStore:
-    """Factory function to get VectorStore instance."""
+    """Factory function to get VectorStore instance (cached)."""
     return VectorStore()
+
+
+def reset_vector_store() -> None:
+    """Reset the cached instance (for testing)."""
+    get_vector_store.cache_clear()

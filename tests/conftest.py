@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import patch, MagicMock
 import os
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Set test environment variables before importing app
 os.environ.update(
@@ -40,6 +41,7 @@ def mock_settings():
 def app(mock_settings):
     """Create test app instance."""
     from fastapi.testclient import TestClient
+
     from src.app.main import app
 
     return TestClient(app)

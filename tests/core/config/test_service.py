@@ -6,7 +6,7 @@ import pytest
 
 from src.core.config.cache import ConfigCache
 from src.core.config.repository import ConfigRepository
-from src.core.config.schemas import ReviewerConfig, ReviewProfile
+from src.core.config.schemas import ReviewerConfig
 from src.core.config.service import ConfigService
 
 
