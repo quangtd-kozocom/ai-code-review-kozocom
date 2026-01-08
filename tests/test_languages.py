@@ -11,6 +11,7 @@ from src.languages import (
 from src.languages.javascript import JavaScriptPlugin
 from src.languages.php import PHPPlugin
 from src.languages.python import PythonPlugin
+from src.languages.typescript import TypeScriptPlugin
 
 
 class TestLanguageRegistry:
@@ -48,7 +49,17 @@ class TestLanguageRegistry:
     def test_get_plugin_for_file_tsx(self):
         plugin = get_plugin_for_file("component.tsx")
         assert plugin is not None
-        assert plugin.name == "javascript"
+        assert plugin.name == "typescript"
+
+    def test_get_plugin_for_file_ts(self):
+        plugin = get_plugin_for_file("service.ts")
+        assert plugin is not None
+        assert plugin.name == "typescript"
+
+    def test_get_plugin_typescript(self):
+        plugin = get_plugin("typescript")
+        assert plugin is not None
+        assert plugin.name == "typescript"
 
     def test_get_plugin_for_file_php(self):
         plugin = get_plugin_for_file("Controller.php")
@@ -70,6 +81,7 @@ class TestLanguageRegistry:
         langs = get_supported_languages()
         assert "python" in langs
         assert "javascript" in langs
+        assert "typescript" in langs
         assert "php" in langs
 
 
@@ -154,8 +166,10 @@ class TestJavaScriptPlugin:
     def test_properties(self, plugin):
         assert plugin.name == "javascript"
         assert ".js" in plugin.extensions
-        assert ".ts" in plugin.extensions
-        assert ".tsx" in plugin.extensions
+        assert ".jsx" in plugin.extensions
+        # TypeScript handled by TypeScriptPlugin
+        assert ".ts" not in plugin.extensions
+        assert ".tsx" not in plugin.extensions
 
     def test_parse_imports_es6(self, plugin):
         content = """
@@ -202,6 +216,36 @@ function example() {
         assert "__tests__/utils.test.js" in patterns
         assert "utils.test.js" in patterns
         assert "utils.spec.js" in patterns
+
+    def test_extract_express_routes(self, plugin):
+        """Test Express.js route extraction."""
+        content = """
+const express = require('express');
+const router = express.Router();
+
+router.get('/users', getUsers);
+router.post('/users', createUser);
+app.delete('/users/:id', deleteUser);
+app.use('/api', apiRouter);
+"""
+        routes = plugin.extract_express_routes(content)
+        assert len(routes) == 4
+        methods = [r["method"] for r in routes]
+        paths = [r["path"] for r in routes]
+        assert "GET" in methods
+        assert "POST" in methods
+        assert "DELETE" in methods
+        assert "USE" in methods
+        assert "/users" in paths
+        assert "/users/:id" in paths
+        assert "/api" in paths
+
+    def test_extract_node_types_includes_variables(self, plugin):
+        """Test that variable declarations are extracted for Express patterns."""
+        node_types = plugin.extract_node_types
+        assert "variable_declaration" in node_types
+        assert "lexical_declaration" in node_types
+        assert "export_statement" in node_types
 
 
 class TestPHPPlugin:
@@ -254,3 +298,92 @@ function example() {
         assert "tests/OrderServiceTest.php" in patterns
         assert "tests/Unit/OrderServiceTest.php" in patterns
         assert "tests/Feature/OrderServiceTest.php" in patterns
+
+
+class TestTypeScriptPlugin:
+    """Tests for TypeScript language plugin."""
+
+    @pytest.fixture
+    def plugin(self):
+        return TypeScriptPlugin()
+
+    def test_properties(self, plugin):
+        assert plugin.name == "typescript"
+        assert ".ts" in plugin.extensions
+        assert ".tsx" in plugin.extensions
+        assert plugin.tree_sitter_name == "typescript"
+
+    def test_get_grammar_for_file(self, plugin):
+        """Test correct grammar selection based on file extension."""
+        assert plugin.get_grammar_for_file("service.ts") == "typescript"
+        assert plugin.get_grammar_for_file("component.tsx") == "tsx"
+        assert plugin.get_grammar_for_file("src/utils/helper.ts") == "typescript"
+        assert plugin.get_grammar_for_file("src/components/Button.tsx") == "tsx"
+
+    def test_parse_imports_es6(self, plugin):
+        content = """
+import { foo, bar } from './utils';
+import * as React from 'react';
+import Component from './Component';
+"""
+        imports = plugin.parse_imports(content)
+        assert "./utils" in imports
+        assert "react" in imports
+        assert "./Component" in imports
+
+    def test_parse_imports_type(self, plugin):
+        content = """
+import type { UserType } from './types';
+import { Request, Response } from 'express';
+"""
+        imports = plugin.parse_imports(content)
+        assert "./types" in imports
+        assert "express" in imports
+
+    def test_parse_imports_side_effect(self, plugin):
+        content = """
+import 'reflect-metadata';
+import './polyfills';
+"""
+        imports = plugin.parse_imports(content)
+        assert "reflect-metadata" in imports
+        assert "./polyfills" in imports
+
+    def test_parse_calls(self, plugin):
+        content = """
+function example() {
+    const result = processData(input);
+    helper.transform(result);
+    return validate(result);
+}
+"""
+        calls = plugin.parse_calls(content)
+        assert "processData" in calls
+        assert "transform" in calls
+        assert "validate" in calls
+
+    def test_get_test_patterns(self, plugin):
+        patterns = plugin.get_test_patterns("src/utils.ts")
+        assert "__tests__/utils.test.ts" in patterns
+        assert "utils.test.ts" in patterns
+        assert "utils.spec.ts" in patterns
+
+    def test_get_test_patterns_tsx(self, plugin):
+        patterns = plugin.get_test_patterns("src/Button.tsx")
+        assert "__tests__/Button.test.tsx" in patterns
+        assert "Button.test.tsx" in patterns
+
+    def test_extract_node_types_includes_typescript(self, plugin):
+        """Test TypeScript-specific node types are extracted."""
+        node_types = plugin.extract_node_types
+        # Functions and classes
+        assert "function_declaration" in node_types
+        assert "class_declaration" in node_types
+        assert "arrow_function" in node_types
+        # Variables (for Express patterns)
+        assert "variable_declaration" in node_types
+        assert "lexical_declaration" in node_types
+        # TypeScript specific
+        assert "interface_declaration" in node_types
+        assert "type_alias_declaration" in node_types
+        assert "enum_declaration" in node_types

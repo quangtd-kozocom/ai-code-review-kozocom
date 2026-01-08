@@ -22,12 +22,12 @@ class TestCodeParser:
     def test_detect_language_typescript(self):
         """Test TypeScript language detection.
 
-        Note: With language plugins, TS/TSX use 'javascript' tree-sitter grammar.
+        Note: TypeScript files are handled by TypeScriptPlugin with proper grammar.
         """
         parser = get_code_parser()
-        # TS/TSX files are handled by the JavaScript plugin
-        assert parser.detect_language("test.ts") == "javascript"
-        assert parser.detect_language("test.tsx") == "javascript"
+        # TS/TSX files are handled by the TypeScript plugin
+        assert parser.detect_language("test.ts") == "typescript"
+        assert parser.detect_language("test.tsx") == "typescript"
 
     def test_detect_language_unsupported(self):
         """Test unsupported file types return None."""

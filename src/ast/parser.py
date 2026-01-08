@@ -61,12 +61,18 @@ class CodeParser:
 
     def _parse_chunks(self, file_path: str, content: str, plugin) -> list[CodeChunk]:
         """Extract chunks using tree-sitter."""
+        # Get grammar name - use file-specific method if available (e.g., TypeScript)
+        if hasattr(plugin, "get_grammar_for_file"):
+            grammar_name = plugin.get_grammar_for_file(file_path)
+        else:
+            grammar_name = plugin.tree_sitter_name
+
         try:
-            parser = ts_pack.get_parser(plugin.tree_sitter_name)
+            parser = ts_pack.get_parser(grammar_name)
             tree = parser.parse(content.encode())
             return self._walk_tree(tree.root_node, file_path, content.encode(), plugin)
         except Exception as e:
-            log.warning("parse_failed", file=file_path, error=str(e))
+            log.warning("parse_failed", file=file_path, error=str(e), grammar=grammar_name)
             return []
 
     def _walk_tree(self, root, file_path: str, content_bytes: bytes, plugin) -> list[CodeChunk]:

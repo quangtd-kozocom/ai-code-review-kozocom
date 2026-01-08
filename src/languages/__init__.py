@@ -18,6 +18,7 @@ from .base import LanguagePlugin
 from .javascript import JavaScriptPlugin
 from .php import PHPPlugin
 from .python import PythonPlugin
+from .typescript import TypeScriptPlugin
 
 # Plugin registry
 _PLUGINS: dict[str, LanguagePlugin] = {}
@@ -82,4 +83,5 @@ def get_supported_languages() -> frozenset[str]:
 # Register plugins at import time
 register(PythonPlugin())
 register(JavaScriptPlugin())
+register(TypeScriptPlugin())
 register(PHPPlugin())
