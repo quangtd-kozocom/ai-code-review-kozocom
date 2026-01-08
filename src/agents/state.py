@@ -115,6 +115,9 @@ class GraphState(TypedDict):
     # Extracted
     files: list[FileChange]
 
+    # Router decisions: {filename: [agents to run]}
+    routing_decisions: dict[str, list[str]]
+
     # Agent outputs (merged via operator.add)
     comments: Annotated[list[ReviewComment], operator.add]
 

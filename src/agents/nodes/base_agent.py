@@ -128,12 +128,20 @@ def create_agent_runner(
     async def run(state: "GraphState") -> dict:
         config: ReviewerConfig = state.get("repo_config", ReviewerConfig())
 
-        # Check if agent is enabled
         if not config.is_agent_enabled(agent_name):
             log.info("agent.disabled", agent=agent_name)
             return {"comments": []}
 
-        files = [f for f in state["files"] if f.patch]
+        routing = state.get("routing_decisions", {})
+        files = [
+            f for f in state["files"]
+            if f.patch and agent_name in routing.get(f.filename, [agent_name])
+        ]
+
+        if not files:
+            log.info("agent.skipped_by_router", agent=agent_name)
+            return {"comments": []}
+
         log.info("agent.started", agent=agent_name, files=len(files))
 
         # Get config values
