@@ -135,6 +135,10 @@ class GitHubService:
         self._token_expires = time.time() + 3500
         return token
 
+    async def get_installation_token(self) -> str:
+        """Get installation access token (public wrapper for _get_token)."""
+        return await self._get_token()
+
     async def _api_get(self, endpoint: str, **kwargs) -> httpx.Response:
         """Make authenticated GET request."""
         token = await self._get_token()

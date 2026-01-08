@@ -14,9 +14,25 @@ class RAGSettings(BaseSettings):
     pinecone_api_key: str = ""
     pinecone_index_name: str = "code-reviewer"
 
-    # Embedding (uses OpenAI via OPENAI_API_KEY from main config)
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dimensions: int = 1024
+    # Embedding Provider: "openai" or "gemini"
+    embedding_provider: str = "gemini"  # Default to Gemini (free tier available)
+
+    # OpenAI Embedding (uses OPENAI_API_KEY from main config)
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_dimensions: int = 1024
+
+    # Google Gemini Embedding (free tier: 1500 req/min)
+    google_api_key: str = ""
+    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_dimensions: int = 768  # Supports 768, 1536, 3072
+
+    # Active embedding dimensions (set based on provider)
+    @property
+    def embedding_dimensions(self) -> int:
+        """Get embedding dimensions based on active provider."""
+        if self.embedding_provider == "gemini":
+            return self.gemini_embedding_dimensions
+        return self.openai_embedding_dimensions
 
     # Chunking
     max_chunk_tokens: int = 500  # Max tokens per chunk

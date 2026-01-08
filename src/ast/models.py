@@ -85,3 +85,5 @@ class RelatedCode:
     chunk_type: str
     relevance_score: float
     relationship: str  # "caller", "callee", "similar", "test"
+    start_line: int = 0
+    end_line: int = 0

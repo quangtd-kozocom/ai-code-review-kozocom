@@ -64,15 +64,30 @@ class Retriever:
             if plugin:
                 test = self._find_test(namespace, file_path, function_name, plugin)
                 if test:
+                    log.debug("retriever.found_test", func=function_name, test=test.name)
                     results.append(test)
 
             # 2. Find CALLERS (functions that call this function)
             callers = self._find_callers(namespace, file_path, function_name)
-            results.extend(callers[:2])  # Limit to 2 callers
+            for c in callers[:2]:
+                log.debug(
+                    "retriever.found_caller",
+                    func=function_name,
+                    caller=c.name,
+                    file=c.file_path,
+                )
+            results.extend(callers[:2])
 
             # 3. Find CALLEES (functions this function calls)
             callees = self._find_callees(namespace, file_path, function_name)
-            results.extend(callees[:2])  # Limit to 2 callees
+            for c in callees[:2]:
+                log.debug(
+                    "retriever.found_callee",
+                    func=function_name,
+                    callee=c.name,
+                    file=c.file_path,
+                )
+            results.extend(callees[:2])
 
             log.info(
                 "retriever.complete",
@@ -150,6 +165,8 @@ class Retriever:
                         chunk_type=r["metadata"].get("chunk_type", "function"),
                         relevance_score=1.0,
                         relationship="test",
+                        start_line=r["metadata"].get("start_line", 0),
+                        end_line=r["metadata"].get("end_line", 0),
                     )
         return None
 
@@ -177,6 +194,8 @@ class Retriever:
                 chunk_type=r["metadata"].get("chunk_type", "function"),
                 relevance_score=1.0,
                 relationship="caller",
+                start_line=r["metadata"].get("start_line", 0),
+                end_line=r["metadata"].get("end_line", 0),
             )
             for r in results
         ]
@@ -219,6 +238,8 @@ class Retriever:
                         chunk_type=r["metadata"].get("chunk_type", "function"),
                         relevance_score=1.0,
                         relationship="callee",
+                        start_line=r["metadata"].get("start_line", 0),
+                        end_line=r["metadata"].get("end_line", 0),
                     )
                 )
         return callees

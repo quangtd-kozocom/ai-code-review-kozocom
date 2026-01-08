@@ -216,7 +216,7 @@ class Indexer:
     ) -> str:
         """Get authenticated clone URL."""
         if installation_id and self.github:
-            token = await self.github.get_installation_token(installation_id)
+            token = await self.github.get_installation_token()
             return f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
         return f"https://github.com/{owner}/{repo}.git"
 

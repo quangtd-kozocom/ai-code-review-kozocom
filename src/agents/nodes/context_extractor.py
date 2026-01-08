@@ -11,7 +11,7 @@ from ...core.config import ReviewerConfig
 from ...core.constants import get_language_or_none
 from ...rag.config import get_rag_settings
 from ...rag.retriever import get_retriever
-from ..state import FileChange, GraphState, PRContext
+from ..state import EnhancedFileChange, FileChange, GraphState, PRContext
 
 log = structlog.get_logger()
 
@@ -109,7 +109,7 @@ async def _enrich_files_with_rag(
     files: list[FileChange],
     ctx: PRContext,
     github: GitHubService,
-) -> list[FileChange]:
+) -> list[FileChange | EnhancedFileChange]:
     """Enrich files with RAG context. Returns original files if RAG unavailable."""
     if not get_rag_settings().pinecone_api_key:
         log.debug("context_extractor.rag_not_configured")
@@ -119,18 +119,23 @@ async def _enrich_files_with_rag(
     pr_details = await github.get_pr_details(ctx.owner, ctx.repo, ctx.pr_number)
     head_sha = pr_details.get("head", {}).get("sha", "HEAD")
     enriched_count = 0
+    result_files: list[FileChange | EnhancedFileChange] = []
 
     for file in files:
+        # Skip files that can't be enriched
         if file.status != "modified" or not parser.detect_language(file.filename):
+            result_files.append(file)
             continue
 
         try:
             content = await github.get_file_raw(ctx.owner, ctx.repo, file.filename, head_sha)
             if not content:
+                result_files.append(file)
                 continue
 
             ast_info = parser.get_ast_info(file.filename, content)
             if not ast_info:
+                result_files.append(file)
                 continue
 
             changed_funcs = _identify_changed_entities(ast_info, file.patch)
@@ -143,14 +148,30 @@ async def _enrich_files_with_rag(
             ]
 
             if related:
+                # Convert to EnhancedFileChange with RAG context
+                enhanced = EnhancedFileChange(
+                    filename=file.filename,
+                    status=file.status,
+                    additions=file.additions,
+                    deletions=file.deletions,
+                    patch=file.patch,
+                    language=file.language,
+                    full_content=content,
+                    ast_info=ast_info,
+                    related_context=related,
+                )
+                result_files.append(enhanced)
                 enriched_count += 1
                 log.debug("context_extractor.enriched_file", file=file.filename, count=len(related))
+            else:
+                result_files.append(file)
 
         except Exception as e:
             log.debug("context_extractor.file_enrichment_failed", file=file.filename, error=str(e))
+            result_files.append(file)
 
     log.info("context_extractor.rag_enrichment_complete", enriched_count=enriched_count)
-    return files
+    return result_files
 
 
 def _identify_changed_entities(ast_info, patch: str) -> list[FunctionInfo]:

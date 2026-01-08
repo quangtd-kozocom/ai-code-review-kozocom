@@ -83,6 +83,12 @@ class ReviewComment(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     agent: str  # Which agent created this
 
+    # RAG context - which files were used to inform this comment
+    related_files: list[str] = Field(default_factory=list)
+
+    # Code suggestion - actual code fix example
+    code_suggestion: str | None = None
+
 
 class PRContext(BaseModel):
     """Context about the PR being reviewed."""
