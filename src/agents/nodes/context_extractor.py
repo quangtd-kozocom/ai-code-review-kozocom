@@ -122,8 +122,8 @@ async def _enrich_files_with_rag(
     result_files: list[FileChange | EnhancedFileChange] = []
 
     for file in files:
-        # Skip files that can't be enriched
-        if file.status != "modified" or not parser.detect_language(file.filename):
+        # Skip files that can't be enriched (but allow both modified and added files)
+        if file.status not in ("modified", "added") or not parser.detect_language(file.filename):
             result_files.append(file)
             continue
 
@@ -139,13 +139,22 @@ async def _enrich_files_with_rag(
                 continue
 
             changed_funcs = _identify_changed_entities(ast_info, file.patch)
-            related = [
-                result
-                for func in changed_funcs[:3]
-                for result in retriever.retrieve_for_function(
-                    ctx.owner, ctx.repo, func.name, func.signature, file.filename
+
+            # For each changed function, try to find related context
+            # Pass function content so retriever can parse calls for new functions
+            related = []
+            for func in changed_funcs[:3]:
+                # Extract function content from full file content
+                func_content = _extract_function_content(content, func)
+                results = retriever.retrieve_for_function(
+                    ctx.owner,
+                    ctx.repo,
+                    func.name,
+                    func.signature,
+                    file.filename,
+                    function_content=func_content,
                 )
-            ]
+                related.extend(results)
 
             if related:
                 # Convert to EnhancedFileChange with RAG context
@@ -174,18 +183,83 @@ async def _enrich_files_with_rag(
     return result_files
 
 
+def _extract_function_content(file_content: str, func: FunctionInfo) -> str:
+    """Extract function content from file using line numbers."""
+    lines = file_content.split("\n")
+    # Line numbers are 1-indexed, but list is 0-indexed
+    start_idx = func.start_line - 1
+    end_idx = func.end_line  # end_line is inclusive
+    return "\n".join(lines[start_idx:end_idx])
+
+
 def _identify_changed_entities(ast_info, patch: str) -> list[FunctionInfo]:
-    """Identify functions containing changed lines from diff."""
-    changed_lines = set(_parse_diff_lines(patch))
-    return [
-        func
-        for func in ast_info.functions
-        if changed_lines & set(range(func.start_line, func.end_line + 1))
-    ]
+    """Identify functions that actually have changes in their body.
+
+    This uses a stricter check: the function must have at least one
+    added line (+ prefix) within its body, not just overlap with
+    the diff hunk range.
+    """
+    # Parse actual added lines (lines with + prefix, excluding hunk headers)
+    added_lines = set(_parse_added_lines(patch))
+
+    if not added_lines:
+        return []
+
+    changed_funcs = []
+    for func in ast_info.functions:
+        func_range = set(range(func.start_line, func.end_line + 1))
+        # Check if any added line is within the function body
+        if added_lines & func_range:
+            changed_funcs.append(func)
+            log.debug(
+                "context_extractor.changed_func_detected",
+                func=func.name,
+                range=f"L{func.start_line}-{func.end_line}",
+                added_lines_in_func=sorted(added_lines & func_range),
+            )
+
+    return changed_funcs
+
+
+def _parse_added_lines(patch: str) -> list[int]:
+    """Extract line numbers of actually added lines (+ prefix) from diff.
+
+    This parses the diff more carefully to find lines that were actually
+    added, not just the hunk range which may include unchanged context lines.
+    """
+    added_lines = []
+    current_line = 0
+
+    for line in patch.split("\n"):
+        # Match hunk header: @@ -old_start,old_count +new_start,new_count @@
+        hunk_match = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+        if hunk_match:
+            current_line = int(hunk_match.group(1))
+            continue
+
+        if current_line == 0:
+            continue
+
+        if line.startswith("+") and not line.startswith("+++"):
+            # This is an added line
+            added_lines.append(current_line)
+            current_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            # Deleted line - doesn't affect new file line numbers
+            pass
+        else:
+            # Context line (space prefix) or other
+            current_line += 1
+
+    return added_lines
 
 
 def _parse_diff_lines(patch: str) -> list[int]:
-    """Extract new file line numbers from diff hunks."""
+    """Extract new file line numbers from diff hunks.
+
+    DEPRECATED: Use _parse_added_lines for more accurate detection.
+    This is kept for backward compatibility.
+    """
     return [
         line
         for match in re.finditer(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", patch)

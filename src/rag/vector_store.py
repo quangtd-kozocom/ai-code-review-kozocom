@@ -135,6 +135,10 @@ class VectorStore:
         This is used for explicit relationship lookups where we don't need
         semantic similarity, just metadata matching.
 
+        IMPORTANT: Pinecone doesn't support pure metadata queries. We use a
+        zero vector which may return unexpected results if the filter doesn't
+        match exactly. Callers MUST validate returned results match their filter.
+
         Args:
             namespace: Namespace to search in.
             filter: Metadata filter dict.
@@ -146,7 +150,10 @@ class VectorStore:
         if self.pc is None:
             return []
         try:
-            # Use a zero vector for metadata-only queries
+            # WARNING: Pinecone zero-vector queries may return approximate results.
+            # The filter is applied, but if no exact matches exist, Pinecone may
+            # still return results based on vector proximity to zero.
+            # Callers should validate that returned metadata matches their filter.
             dummy = [0.0] * self._settings.embedding_dimensions
             results = self.index.query(
                 namespace=namespace,
@@ -155,7 +162,20 @@ class VectorStore:
                 top_k=top_k,
                 include_metadata=True,
             )
-            return [{"id": m.id, "score": m.score, "metadata": m.metadata} for m in results.matches]
+
+            matches = [{"id": m.id, "score": m.score, "metadata": m.metadata} for m in results.matches]
+
+            # Log debug info if results seem suspicious (low scores with zero vector)
+            if matches and all(m["score"] < 0.1 for m in matches):
+                log.debug(
+                    "query_by_metadata_low_scores",
+                    filter=filter,
+                    namespace=namespace,
+                    result_count=len(matches),
+                    hint="Results may not match filter - validate in caller",
+                )
+
+            return matches
         except Exception as e:
             log.warning("query_by_metadata_failed", error=str(e))
             return []

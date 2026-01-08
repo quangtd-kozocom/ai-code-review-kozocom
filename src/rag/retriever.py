@@ -108,6 +108,7 @@ class Retriever:
         function_name: str,
         signature: str | None = None,
         current_file: str | None = None,
+        function_content: str | None = None,
     ) -> list[RelatedCode]:
         """Retrieve context for a specific function.
 
@@ -119,6 +120,7 @@ class Retriever:
             function_name: Name of the function.
             signature: Function signature (not used in v2, kept for API compat).
             current_file: Path to the file containing the function.
+            function_content: Content of the function (for new functions not in index).
 
         Returns:
             List of RelatedCode with explicit relationships.
@@ -127,12 +129,128 @@ class Retriever:
             log.warning("retriever.no_file_path", func=function_name)
             return []
 
-        return self.retrieve(
+        # First try normal retrieval (function exists in index)
+        results = self.retrieve(
             owner=owner,
             repo=repo,
             file_path=current_file,
             function_name=function_name,
         )
+
+        # If no results and we have function content, try to find callees
+        # by parsing the content directly (for new functions not in index)
+        if not results and function_content:
+            log.debug(
+                "retriever.trying_content_parse",
+                func=function_name,
+                file=current_file,
+            )
+            results = self._find_callees_from_content(
+                owner=owner,
+                repo=repo,
+                file_path=current_file,
+                function_content=function_content,
+            )
+
+        return results
+
+    def _find_callees_from_content(
+        self,
+        owner: str,
+        repo: str,
+        file_path: str,
+        function_content: str,
+    ) -> list[RelatedCode]:
+        """Find callees by parsing function content directly.
+
+        This is used for new functions that aren't in the index yet.
+        We parse their content to find function calls, then lookup
+        those functions in the index.
+        """
+        namespace = f"{owner}/{repo}"
+        plugin = get_plugin_for_file(file_path)
+        if not plugin:
+            return []
+
+        # Parse calls from function content
+        calls = plugin.parse_calls(function_content)
+        if not calls:
+            return []
+
+        log.debug(
+            "retriever.parsed_calls_from_content",
+            file=file_path,
+            calls=calls[:10],  # Log first 10
+        )
+
+        # Lookup each called function in the index
+        # First try to find callees from OTHER files
+        callees = []
+        same_file_callees = []
+
+        for name in calls[:5]:  # Limit to 5 to reduce queries
+            # Try other files first
+            results = self._store.query_by_metadata(
+                namespace=namespace,
+                filter={"name": name, "file_path": {"$ne": file_path}},
+                top_k=1,
+            )
+            if results:
+                r = results[0]
+                result_name = r["metadata"].get("name", "")
+                if result_name == name:
+                    callees.append(
+                        RelatedCode(
+                            file_path=r["metadata"]["file_path"],
+                            name=r["metadata"]["name"],
+                            content=r["metadata"].get("content", ""),
+                            chunk_type=r["metadata"].get("chunk_type", "function"),
+                            relevance_score=1.0,
+                            relationship="callee",
+                            start_line=r["metadata"].get("start_line", 0),
+                            end_line=r["metadata"].get("end_line", 0),
+                        )
+                    )
+                    continue
+
+            # If not found in other files, check same file
+            results = self._store.query_by_metadata(
+                namespace=namespace,
+                filter={"name": name, "file_path": file_path},
+                top_k=1,
+            )
+            if results:
+                r = results[0]
+                result_name = r["metadata"].get("name", "")
+                if result_name == name:
+                    same_file_callees.append(
+                        RelatedCode(
+                            file_path=r["metadata"]["file_path"],
+                            name=r["metadata"]["name"],
+                            content=r["metadata"].get("content", ""),
+                            chunk_type=r["metadata"].get("chunk_type", "function"),
+                            relevance_score=0.9,  # Slightly lower relevance for same file
+                            relationship="callee",
+                            start_line=r["metadata"].get("start_line", 0),
+                            end_line=r["metadata"].get("end_line", 0),
+                        )
+                    )
+
+        # If no callees from other files, include same-file callees
+        if not callees and same_file_callees:
+            callees = same_file_callees[:2]  # Limit same-file callees
+            log.debug(
+                "retriever.using_same_file_callees",
+                file=file_path,
+                count=len(callees),
+            )
+
+        log.info(
+            "retriever.found_callees_from_content",
+            count=len(callees),
+            file=file_path,
+        )
+        return callees
 
     def _find_test(
         self, namespace: str, file_path: str, function_name: str, plugin
@@ -186,19 +304,35 @@ class Retriever:
             },
             top_k=5,
         )
-        return [
-            RelatedCode(
-                file_path=r["metadata"]["file_path"],
-                name=r["metadata"]["name"],
-                content=r["metadata"].get("content", ""),
-                chunk_type=r["metadata"].get("chunk_type", "function"),
-                relevance_score=1.0,
-                relationship="caller",
-                start_line=r["metadata"].get("start_line", 0),
-                end_line=r["metadata"].get("end_line", 0),
+
+        # Validate results - Pinecone zero-vector queries may return noise
+        validated_callers = []
+        for r in results:
+            calls_list = r["metadata"].get("calls", [])
+            # Verify this function actually has the target in its calls list
+            if function_name not in calls_list:
+                log.debug(
+                    "retriever.caller_mismatch",
+                    caller=r["metadata"].get("name"),
+                    expected_call=function_name,
+                    actual_calls=calls_list,
+                )
+                continue
+
+            validated_callers.append(
+                RelatedCode(
+                    file_path=r["metadata"]["file_path"],
+                    name=r["metadata"]["name"],
+                    content=r["metadata"].get("content", ""),
+                    chunk_type=r["metadata"].get("chunk_type", "function"),
+                    relevance_score=1.0,
+                    relationship="caller",
+                    start_line=r["metadata"].get("start_line", 0),
+                    end_line=r["metadata"].get("end_line", 0),
+                )
             )
-            for r in results
-        ]
+
+        return validated_callers
 
     def _find_callees(
         self, namespace: str, file_path: str, function_name: str
@@ -217,6 +351,16 @@ class Retriever:
         if not current:
             return []
 
+        # Validate that we got the exact function we asked for
+        # (Pinecone zero-vector queries may return approximate matches)
+        if current[0]["metadata"].get("name") != function_name:
+            log.debug(
+                "retriever.callee_mismatch",
+                expected=function_name,
+                got=current[0]["metadata"].get("name"),
+            )
+            return []
+
         called = current[0]["metadata"].get("calls", [])
         if not called:
             return []
@@ -230,6 +374,17 @@ class Retriever:
             )
             if results:
                 r = results[0]
+                # Validate that the result name matches what we queried for
+                # This prevents noise from Pinecone's zero-vector similarity search
+                result_name = r["metadata"].get("name", "")
+                if result_name != name:
+                    log.debug(
+                        "retriever.callee_result_mismatch",
+                        expected=name,
+                        got=result_name,
+                    )
+                    continue
+
                 callees.append(
                     RelatedCode(
                         file_path=r["metadata"]["file_path"],
