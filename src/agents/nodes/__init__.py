@@ -7,12 +7,14 @@ from . import (
     logic_agent,
     security_agent,
     slack_reporter,
+    smart_router,
     style_agent,
 )
 
 __all__ = [
     "acknowledger",
     "context_extractor",
+    "smart_router",
     "security_agent",
     "style_agent",
     "logic_agent",

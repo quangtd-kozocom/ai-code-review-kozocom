@@ -8,18 +8,20 @@ from .nodes import (
     logic_agent,
     security_agent,
     slack_reporter,
+    smart_router,
     style_agent,
 )
 from .state import GraphState
 
 
 def create_graph() -> StateGraph:
-    """Create the review workflow graph."""
+    """Create the review workflow graph with smart routing."""
     g = StateGraph(GraphState)
 
     # Nodes
     g.add_node("acknowledge", acknowledger.run)
     g.add_node("extract", context_extractor.run)
+    g.add_node("router", smart_router.run)
     g.add_node("security", security_agent.run)
     g.add_node("style", style_agent.run)
     g.add_node("logic", logic_agent.run)
@@ -27,16 +29,15 @@ def create_graph() -> StateGraph:
     g.add_node("publish", github_publisher.run)
     g.add_node("notify", slack_reporter.run)
 
-    # Flow
+    # Flow: acknowledge -> extract -> router -> parallel agents -> aggregate -> publish -> notify
     g.set_entry_point("acknowledge")
-
-    # Acknowledge -> Extract
     g.add_edge("acknowledge", "extract")
+    g.add_edge("extract", "router")
 
-    # Parallel agents (fan-out)
-    g.add_edge("extract", "security")
-    g.add_edge("extract", "style")
-    g.add_edge("extract", "logic")
+    # Router fans out to all agents (agents self-filter based on routing_decisions)
+    g.add_edge("router", "security")
+    g.add_edge("router", "style")
+    g.add_edge("router", "logic")
 
     # Fan-in to aggregator
     g.add_edge("security", "aggregate")
