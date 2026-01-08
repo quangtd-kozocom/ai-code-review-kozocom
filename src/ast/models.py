@@ -41,24 +41,81 @@ class CodeChunk:
         return "\n".join(parts)
 
 
-@dataclass
+@dataclass(slots=True)
+class ParameterInfo:
+    """Information about a function parameter."""
+
+    name: str
+    type_hint: str | None = None
+    default_value: str | None = None
+    is_variadic: bool = False  # *args
+    is_keyword: bool = False  # **kwargs
+
+
+@dataclass(slots=True)
 class FunctionInfo:
-    """Information about a function/method."""
+    """Information about a function/method.
+
+    Enhanced with Python 3.13 features for comprehensive AST extraction.
+    """
 
     name: str
     signature: str | None
     start_line: int
     end_line: int
 
+    # Enhanced fields for RAG context
+    parameters: list[ParameterInfo] = field(default_factory=list)
+    return_type: str | None = None
+    decorators: list[str] = field(default_factory=list)
+    is_async: bool = False
+    is_method: bool = False
+    docstring: str | None = None
 
-@dataclass
+    def format_for_context(self) -> str:
+        """Format function info for LLM context."""
+        parts = [f"{'async ' if self.is_async else ''}def {self.name}"]
+
+        if self.parameters:
+            params = ", ".join(
+                f"{p.name}: {p.type_hint}" if p.type_hint else p.name for p in self.parameters
+            )
+            parts.append(f"({params})")
+        else:
+            parts.append("()")
+
+        if self.return_type:
+            parts.append(f" -> {self.return_type}")
+
+        return "".join(parts)
+
+
+@dataclass(slots=True)
 class ClassInfo:
-    """Information about a class."""
+    """Information about a class.
+
+    Enhanced with inheritance and decorator info for RAG context.
+    """
 
     name: str
     methods: list[str]
     start_line: int
     end_line: int
+
+    # Enhanced fields
+    base_classes: list[str] = field(default_factory=list)
+    decorators: list[str] = field(default_factory=list)
+    docstring: str | None = None
+    class_variables: list[str] = field(default_factory=list)
+
+    def format_for_context(self) -> str:
+        """Format class info for LLM context."""
+        parts = [f"class {self.name}"]
+
+        if self.base_classes:
+            parts.append(f"({', '.join(self.base_classes)})")
+
+        return "".join(parts)
 
 
 @dataclass

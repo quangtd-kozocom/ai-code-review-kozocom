@@ -43,16 +43,29 @@ class EnhancedFileChange(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     def format_for_prompt(self) -> str:
-        """Format file change for LLM prompt."""
+        """Format file change for LLM prompt with enhanced context.
+
+        Includes:
+        - Diff content
+        - Enhanced code structure (functions with signatures, types, decorators)
+        - Class inheritance info
+        - Related code from RAG
+        """
         lines = [f"## File: {self.filename}", "", "### Diff:", "```", self.patch, "```"]
 
-        # Add AST info if available
+        # Add enhanced AST info if available
         if self.ast_info and (self.ast_info.functions or self.ast_info.classes):
             lines.extend(["", "### Code Structure:"])
-            if funcs := [f.name for f in self.ast_info.functions]:
-                lines.append(f"- Functions: {', '.join(funcs)}")
-            if classes := [c.name for c in self.ast_info.classes]:
-                lines.append(f"- Classes: {', '.join(classes)}")
+
+            # Enhanced function info with types and decorators
+            for func in self.ast_info.functions:
+                func_desc = self._format_function_info(func)
+                lines.append(func_desc)
+
+            # Enhanced class info with inheritance
+            for cls in self.ast_info.classes:
+                cls_desc = self._format_class_info(cls)
+                lines.append(cls_desc)
 
         # Add related context (top 3)
         if self.related_context:
@@ -69,6 +82,70 @@ class EnhancedFileChange(BaseModel):
                 )
 
         return "\n".join(lines)
+
+    def _format_function_info(self, func) -> str:
+        """Format FunctionInfo with enhanced details."""
+        parts: list[str] = []
+
+        # Decorators
+        if hasattr(func, "decorators") and func.decorators:
+            parts.append(f"  @{', @'.join(func.decorators)}")
+
+        # Async indicator
+        prefix = "async " if getattr(func, "is_async", False) else ""
+
+        # Function signature with types
+        if hasattr(func, "parameters") and func.parameters:
+            params = ", ".join(
+                f"{p.name}: {p.type_hint}" if p.type_hint else p.name for p in func.parameters
+            )
+            sig = f"{prefix}def {func.name}({params})"
+        else:
+            sig = f"{prefix}def {func.name}()"
+
+        # Return type
+        if hasattr(func, "return_type") and func.return_type:
+            sig += f" -> {func.return_type}"
+
+        parts.append(f"- **Function**: `{sig}`")
+
+        # Docstring summary
+        if hasattr(func, "docstring") and func.docstring:
+            # First line of docstring
+            doc_summary = func.docstring.split("\n")[0][:100]
+            parts.append(f"  - Doc: {doc_summary}")
+
+        return "\n".join(parts)
+
+    def _format_class_info(self, cls) -> str:
+        """Format ClassInfo with enhanced details."""
+        parts: list[str] = []
+
+        # Decorators
+        if hasattr(cls, "decorators") and cls.decorators:
+            parts.append(f"  @{', @'.join(cls.decorators)}")
+
+        # Class with inheritance
+        if hasattr(cls, "base_classes") and cls.base_classes:
+            inheritance = f"({', '.join(cls.base_classes)})"
+        else:
+            inheritance = ""
+
+        parts.append(f"- **Class**: `{cls.name}{inheritance}`")
+
+        # Methods
+        if cls.methods:
+            methods_str = ", ".join(cls.methods[:5])
+            if len(cls.methods) > 5:
+                methods_str += f" ... (+{len(cls.methods) - 5} more)"
+            parts.append(f"  - Methods: {methods_str}")
+
+        # Docstring summary
+        if hasattr(cls, "docstring") and cls.docstring:
+            doc_summary = cls.docstring.split("\n")[0][:100]
+            parts.append(f"  - Doc: {doc_summary}")
+
+        return "\n".join(parts)
 
 
 class ReviewComment(BaseModel):

@@ -2,6 +2,8 @@
 
 This module provides tree-sitter based code parsing with language plugin support.
 It extracts code chunks (functions, classes, methods) with their imports and calls.
+
+Enhanced for Python 3.13+ with comprehensive extraction for RAG context.
 """
 
 from dataclasses import dataclass
@@ -17,7 +19,7 @@ from .models import ASTInfo, ClassInfo, CodeChunk, FunctionInfo
 log = structlog.get_logger()
 
 
-@dataclass
+@dataclass(slots=True)
 class ParseResult:
     """Result of parsing a file."""
 
@@ -30,6 +32,13 @@ class CodeParser:
 
     This parser extracts code chunks (functions, classes) with their
     imports and function calls for relationship-based RAG retrieval.
+
+    Enhanced to extract:
+    - Type hints (parameters, return types)
+    - Decorators
+    - Async function detection
+    - Class inheritance
+    - Full docstrings
     """
 
     def parse(self, file_path: str, content: str) -> ParseResult | None:
@@ -63,10 +72,11 @@ class CodeParser:
     def _parse_chunks(self, file_path: str, content: str, plugin) -> list[CodeChunk]:
         """Extract chunks using tree-sitter."""
         # Get grammar name - use file-specific method if available (e.g., TypeScript)
-        if hasattr(plugin, "get_grammar_for_file"):
-            grammar_name = plugin.get_grammar_for_file(file_path)
-        else:
-            grammar_name = plugin.tree_sitter_name
+        grammar_name = (
+            plugin.get_grammar_for_file(file_path)
+            if hasattr(plugin, "get_grammar_for_file")
+            else plugin.tree_sitter_name
+        )
 
         try:
             parser = ts_pack.get_parser(grammar_name)
@@ -78,12 +88,11 @@ class CodeParser:
 
     def _walk_tree(self, root, file_path: str, content_bytes: bytes, plugin) -> list[CodeChunk]:
         """Walk AST and extract matching nodes."""
-        chunks = []
+        chunks: list[CodeChunk] = []
 
-        def walk(node):
+        def walk(node) -> None:
             if node.type in plugin.extract_node_types:
-                chunk = self._node_to_chunk(node, file_path, content_bytes, plugin)
-                if chunk:
+                if chunk := self._node_to_chunk(node, file_path, content_bytes, plugin):
                     chunks.append(chunk)
             for child in node.children:
                 walk(child)
@@ -154,6 +163,13 @@ class CodeParser:
     def get_ast_info(self, file_path: str, content: str) -> ASTInfo | None:
         """Get structured AST info for a file.
 
+        Enhanced to extract comprehensive information for RAG context:
+        - Type hints (parameters, return types)
+        - Decorators
+        - Async function detection
+        - Class inheritance
+        - Full docstrings
+
         Args:
             file_path: Path to the file.
             content: File content.
@@ -165,39 +181,116 @@ class CodeParser:
         if not plugin:
             return None
 
-        result = self.parse(file_path, content)
-        if not result:
+        # Get grammar and parse tree
+        grammar_name = (
+            plugin.get_grammar_for_file(file_path)
+            if hasattr(plugin, "get_grammar_for_file")
+            else plugin.tree_sitter_name
+        )
+
+        try:
+            parser = ts_pack.get_parser(grammar_name)
+            tree = parser.parse(content.encode())
+        except Exception as e:
+            log.warning("parse_failed", file=file_path, error=str(e))
             return None
 
+        content_bytes = content.encode()
         functions: list[FunctionInfo] = []
         classes: list[ClassInfo] = []
 
-        for chunk in result.chunks:
-            if chunk.chunk_type in ("function", "method"):
-                functions.append(
-                    FunctionInfo(
-                        name=chunk.name,
-                        signature=chunk.signature,
-                        start_line=chunk.start_line,
-                        end_line=chunk.end_line,
-                    )
-                )
-            elif chunk.chunk_type == "class":
-                classes.append(
-                    ClassInfo(
-                        name=chunk.name,
-                        methods=[],
-                        start_line=chunk.start_line,
-                        end_line=chunk.end_line,
-                    )
-                )
+        # Walk tree and extract enhanced info
+        def walk(node) -> None:
+            match node.type:
+                case "function_definition":
+                    if func_info := self._extract_function_info(node, content_bytes, plugin):
+                        functions.append(func_info)
+
+                case "class_definition":
+                    if class_info := self._extract_class_info(node, content_bytes, plugin):
+                        classes.append(class_info)
+
+            for child in node.children:
+                walk(child)
+
+        walk(tree.root_node)
 
         return ASTInfo(
             file_path=file_path,
             language=plugin.name,
             functions=functions,
             classes=classes,
-            imports=result.imports,
+            imports=plugin.parse_imports(content),
+        )
+
+    def _extract_function_info(self, node, content_bytes: bytes, plugin) -> FunctionInfo | None:
+        """Extract enhanced FunctionInfo from AST node."""
+        # Get function name
+        name = None
+        for child in node.children:
+            if child.type == "identifier":
+                name = child.text.decode()
+                break
+
+        if not name:
+            return None
+
+        # Use plugin's enhanced extraction if available
+        if hasattr(plugin, "get_function_details"):
+            details = plugin.get_function_details(node, content_bytes)
+            return FunctionInfo(
+                name=name,
+                signature=details.get("signature"),
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                parameters=details.get("parameters", []),
+                return_type=details.get("return_type"),
+                decorators=details.get("decorators", []),
+                is_async=details.get("is_async", False),
+                docstring=details.get("docstring"),
+            )
+
+        # Fallback for plugins without enhanced extraction
+        return FunctionInfo(
+            name=name,
+            signature=plugin.extract_signature(node, content_bytes),
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            docstring=plugin.extract_docstring(node, content_bytes),
+        )
+
+    def _extract_class_info(self, node, content_bytes: bytes, plugin) -> ClassInfo | None:
+        """Extract enhanced ClassInfo from AST node."""
+        # Get class name
+        name = None
+        for child in node.children:
+            if child.type == "identifier":
+                name = child.text.decode()
+                break
+
+        if not name:
+            return None
+
+        # Use plugin's enhanced extraction if available
+        if hasattr(plugin, "get_class_details"):
+            details = plugin.get_class_details(node, content_bytes)
+            return ClassInfo(
+                name=name,
+                methods=details.get("methods", []),
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                base_classes=details.get("base_classes", []),
+                decorators=details.get("decorators", []),
+                docstring=details.get("docstring"),
+                class_variables=details.get("class_variables", []),
+            )
+
+        # Fallback for plugins without enhanced extraction
+        return ClassInfo(
+            name=name,
+            methods=[],
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
         )
 
 

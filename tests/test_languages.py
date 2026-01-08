@@ -155,6 +155,183 @@ def example():
         assert "tests/test_utils.py" in patterns
         assert "test_utils.py" in patterns
 
+    # =========================================================================
+    # Enhanced extraction tests (Python 3.13+ features)
+    # =========================================================================
+
+    def test_extract_decorators(self, plugin):
+        """Test decorator extraction from function."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = """@staticmethod
+@cache
+def compute(x: int) -> int:
+    return x * 2
+"""
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        # Find function node
+        func_node = None
+        for child in tree.root_node.children:
+            if child.type == "decorated_definition":
+                for sub in child.children:
+                    if sub.type == "function_definition":
+                        func_node = child  # Use decorated_definition for decorator extraction
+                        break
+
+        decorators = plugin.extract_decorators(func_node, content_bytes)
+        assert "staticmethod" in decorators
+        assert "cache" in decorators
+
+    def test_extract_parameters_with_types(self, plugin):
+        """Test parameter extraction with type hints."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = """def process(data: list[str], count: int = 10, *args, **kwargs) -> dict:
+    pass
+"""
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        # Find function node
+        func_node = tree.root_node.children[0]
+        params = plugin.extract_parameters(func_node, content_bytes)
+
+        # Check parameters
+        param_names = [p.name for p in params]
+        assert "data" in param_names
+        assert "count" in param_names
+
+        # Check type hints
+        data_param = next(p for p in params if p.name == "data")
+        assert data_param.type_hint == "list[str]"
+
+    def test_extract_return_type(self, plugin):
+        """Test return type extraction."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = """def calculate(x: int) -> float:
+    return x * 1.5
+"""
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        func_node = tree.root_node.children[0]
+        return_type = plugin.extract_return_type(func_node, content_bytes)
+        assert return_type == "float"
+
+    def test_is_async_function(self, plugin):
+        """Test async function detection."""
+        import tree_sitter_language_pack as ts_pack
+
+        async_content = """async def fetch_data(url: str) -> dict:
+    return {}
+"""
+        sync_content = """def fetch_data(url: str) -> dict:
+    return {}
+"""
+        parser = ts_pack.get_parser("python")
+
+        async_tree = parser.parse(async_content.encode())
+        sync_tree = parser.parse(sync_content.encode())
+
+        async_node = async_tree.root_node.children[0]
+        sync_node = sync_tree.root_node.children[0]
+
+        assert plugin.is_async_function(async_node) is True
+        assert plugin.is_async_function(sync_node) is False
+
+    def test_extract_base_classes(self, plugin):
+        """Test base class extraction."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = """class OrderService(BaseService, Loggable):
+    pass
+"""
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        class_node = tree.root_node.children[0]
+        base_classes = plugin.extract_base_classes(class_node, content_bytes)
+
+        assert "BaseService" in base_classes
+        assert "Loggable" in base_classes
+
+    def test_extract_full_docstring(self, plugin):
+        """Test full docstring extraction with multiline support."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = '''def calculate(x: int) -> int:
+    """Calculate the result.
+
+    This is a multiline docstring.
+    It has multiple lines.
+    """
+    return x * 2
+'''
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        func_node = tree.root_node.children[0]
+        docstring = plugin.extract_docstring(func_node, content_bytes)
+
+        assert docstring is not None
+        assert "Calculate the result" in docstring
+        assert "multiline" in docstring
+
+    def test_get_function_details(self, plugin):
+        """Test comprehensive function details extraction."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = '''async def process_data(items: list[dict], limit: int = 100) -> list[str]:
+    """Process data items."""
+    return []
+'''
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        func_node = tree.root_node.children[0]
+        details = plugin.get_function_details(func_node, content_bytes)
+
+        assert details["is_async"] is True
+        assert details["return_type"] == "list[str]"
+        assert len(details["parameters"]) >= 2
+        assert "Process data items" in details["docstring"]
+
+    def test_get_class_details(self, plugin):
+        """Test comprehensive class details extraction."""
+        import tree_sitter_language_pack as ts_pack
+
+        content = '''class UserService(BaseService):
+    """Service for user operations."""
+
+    default_limit = 100
+
+    def get_user(self, user_id: int) -> dict:
+        pass
+
+    def create_user(self, data: dict) -> dict:
+        pass
+'''
+        parser = ts_pack.get_parser("python")
+        tree = parser.parse(content.encode())
+        content_bytes = content.encode()
+
+        class_node = tree.root_node.children[0]
+        details = plugin.get_class_details(class_node, content_bytes)
+
+        assert "BaseService" in details["base_classes"]
+        assert "get_user" in details["methods"]
+        assert "create_user" in details["methods"]
+        assert "Service for user operations" in details["docstring"]
+
 
 class TestJavaScriptPlugin:
     """Tests for JavaScript language plugin."""
