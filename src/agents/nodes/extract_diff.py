@@ -80,13 +80,15 @@ async def run(state: ReviewState) -> dict:
         function_changes: dict[str, dict] = {}
         new_files: list[str] = []
         deleted_files: list[str] = []
-        
+        file_contents: dict[str, str] = {}  # Map file paths to their content
+
         for diff in filtered_diffs:
             match diff.status:
                 case ChangeType.ADDED:
                     new_files.append(diff.file_path)
                     # Extract functions from new file
                     if diff.head_content:
+                        file_contents[diff.file_path] = diff.head_content
                         funcs = analyzer.extract_functions(
                             diff.file_path, diff.head_content
                         )
@@ -95,11 +97,12 @@ async def run(state: ReviewState) -> dict:
                                 "type": "added",
                                 "new": func,
                             }
-                
+
                 case ChangeType.DELETED:
                     deleted_files.append(diff.file_path)
                     # Extract functions from deleted file
                     if diff.base_content:
+                        file_contents[diff.file_path] = diff.base_content
                         funcs = analyzer.extract_functions(
                             diff.file_path, diff.base_content
                         )
@@ -108,10 +111,11 @@ async def run(state: ReviewState) -> dict:
                                 "type": "deleted",
                                 "old": func,
                             }
-                
+
                 case ChangeType.MODIFIED | ChangeType.RENAMED:
                     # Compare functions between versions
                     if diff.base_content and diff.head_content:
+                        file_contents[diff.file_path] = diff.head_content
                         changes = analyzer.compare_functions(
                             diff.base_content,
                             diff.head_content,
@@ -132,5 +136,6 @@ async def run(state: ReviewState) -> dict:
             "function_changes": function_changes,
             "new_files": new_files,
             "deleted_files": deleted_files,
+            "file_contents": file_contents,
             "skip_review": False,
         }

@@ -11,13 +11,43 @@ SYSTEM_PROMPT = """You are an expert code reviewer focusing on code quality, sec
 Before reporting ANY issue:
 1. **CITE YOUR SOURCE**: Quote exact code from provided context proving the issue
 2. **VERIFY DON'T SPECULATE**: If you can't cite proof, DON'T report it
-3. **ADMIT UNCERTAINTY**: If implementation not in context, say so explicitly
+3. **CHECK DEPENDENCIES**: If callee source is provided, verify behavior before claiming issues
+4. **ADMIT UNCERTAINTY**: If implementation not in context, say so explicitly
 
-## Your Approach
-- Be specific and actionable in your feedback
-- Prioritize critical issues over style preferences
-- Consider the context of callers and callees
-- Suggest concrete improvements when possible
+## 🔍 DEPENDENCY VERIFICATION RULES
+
+When you see a callee (called function):
+1. **If callee source code is provided**:
+   - Check if it validates inputs → DON'T report missing validation in caller
+   - Check if it handles None → DON'T report None handling in caller
+   - Check if it provides the safety check → DON'T duplicate the comment
+   - Quote the callee code that provides the safety
+2. **If callee source NOT provided**:
+   - Say "Cannot verify X behavior - callee source not in context"
+   - Set confidence to 0.65 (will be filtered out)
+   - Do NOT assume the callee has bugs
+
+## 📊 CONFIDENCE CALIBRATION
+
+Use these confidence scores:
+- **0.95**: Definite bug with proof (IndexError, null deref with no check, logic error)
+- **0.85**: High-likelihood bug with context evidence
+- **0.75**: Potential bug, callee verified
+- **0.65**: Potential bug, callee NOT verified (will be filtered - below 0.7 threshold)
+- **< 0.7**: Don't report - will be filtered out
+
+## 🎯 PRIORITIZATION
+
+**Focus on REAL BUGS:**
+- Logic errors
+- Unhandled exceptions
+- Boundary conditions
+- Security vulnerabilities
+- Null/None dereferences with no safety checks
+
+**Skip redundant validation comments:**
+- If validation exists in called functions, don't report it in caller
+- Aggregate related issues instead of repeating the same pattern
 
 ## Output Format
 Respond with a JSON object containing a "findings" array.
@@ -26,7 +56,8 @@ Each finding must have:
 - severity: "critical" | "warning" | "info" | "suggestion"
 - message: str (clear explanation of the issue)
 - suggestion: str | null (how to fix it)
-- confidence: float (0.0 to 1.0, how certain you are)
+- confidence: float (0.0 to 1.0, use calibration above)
+- dependencies_checked: list[dict] | null (dependencies that were verified, optional)
 """
 
 
@@ -39,13 +70,15 @@ def build_function_review_prompt(
     new_code: str | None,
     diff: str | None,
     callers: list[dict],
-    callees: list[str],
+    callees: list[dict],  # Changed from list[str] to list[dict] for CalleeInfo
     review_questions: list[str],
     focus_areas: list[str],
     review_depth: str,
+    external_files: list[dict] | None = None,
+    breaking_changes: list[str] | None = None,
 ) -> str:
     """Build targeted prompt for function review.
-    
+
     Args:
         function_name: Name of the function being reviewed.
         file_path: Path to the file.
@@ -55,11 +88,13 @@ def build_function_review_prompt(
         new_code: New version of the code.
         diff: Unified diff of changes.
         callers: List of functions that call this one.
-        callees: List of functions this one calls.
+        callees: List of CalleeInfo dicts with source code.
         review_questions: Specific questions to answer.
         focus_areas: Areas to focus on during review.
         review_depth: How deep to review (deep, standard, quick).
-        
+        external_files: External files that depend on this code (from discovery).
+        breaking_changes: List of detected breaking changes.
+
     Returns:
         Formatted prompt string.
     """
@@ -138,12 +173,82 @@ def build_function_review_prompt(
                 "",
             ])
     
-    # Callees
+    # Callees with source code
     if callees:
         lines.extend([
             f"## Dependencies (calls {len(callees)} functions)",
             "",
-            ", ".join(f"`{c}`" for c in callees[:10]),
+        ])
+
+        for callee in callees:
+            lines.append(f"### `{callee['name']}`")
+
+            if callee.get('file_path'):
+                lines.append(f"**File**: {callee['file_path']}")
+
+            if callee.get('signature'):
+                lines.append(f"**Signature**: `{callee['signature']}`")
+
+            if callee.get('has_validation'):
+                lines.append("**Has Validation**: ✅ Yes")
+
+            if callee.get('returns_optional'):
+                lines.append("**Can Return None**: ⚠️ Yes")
+
+            if callee.get('source_code'):
+                lines.extend([
+                    "",
+                    "**Source Code:**",
+                    "```python",
+                    callee['source_code'],
+                    "```",
+                ])
+            else:
+                lines.extend([
+                    "",
+                    "*Source code not available in context - cannot verify behavior*",
+                ])
+
+            lines.append("")
+    
+    # External files context (NEW)
+    if external_files:
+        lines.extend([
+            f"## 🔍 External Files Affected ({len(external_files)} files found)",
+            "",
+            "**These files outside the PR depend on this code:**",
+            "",
+        ])
+        
+        for ext_file in external_files[:10]:  # Limit to 10
+            lines.append(f"### {ext_file.get('path', 'Unknown')}")
+            lines.append(f"**Usage Type:** {ext_file.get('usage_type', 'unknown')}")
+            
+            if ext_file.get('references'):
+                lines.append(f"**References:** {', '.join(ext_file['references'])}")
+            
+            if ext_file.get('will_break'):
+                lines.append(f"**⚠️ WILL BREAK:** {ext_file.get('break_reason', 'Incompatible change')}")
+            
+            if ext_file.get('affected_lines'):
+                lines.append(f"**Affected Lines:** {', '.join(map(str, ext_file['affected_lines'][:5]))}")
+            
+            lines.append("")
+    
+    # Breaking changes summary (NEW)
+    if breaking_changes:
+        lines.extend([
+            "## 🚨 Breaking Changes Detected",
+            "",
+        ])
+        for change in breaking_changes:
+            lines.append(f"- {change}")
+        lines.append("")
+        lines.extend([
+            "**Review with this context:**",
+            "- Will the changes break any of the external files?",
+            "- Are there missing exception handlers that external callers expect?",
+            "- Is the change backward compatible with external usage?",
             "",
         ])
     

@@ -13,6 +13,8 @@ from .nodes import (
     aggregate,
     analyze_impact,
     build_call_graph,
+    discover_externals,
+    evaluate_context,
     extract_diff,
     review_function,
     route_review,
@@ -50,30 +52,36 @@ def create_review_graph() -> StateGraph:
     START
       │
       ▼
-    extract_diff ──────────────────────────────┐
-      │                                         │
-      ▼                                         │ (skip)
+    extract_diff ─────────skip────────────────┐
+      │                                        │
+      ▼ continue                               │
     build_call_graph                           │
-      │                                         │
-      ▼                                         │
+      │                                        │
+      ▼                                        │
     analyze_impact                             │
-      │                                         │
-      ▼                                         │
+      │                                        │
+      ▼                                        │
+    discover_externals ◄─────┐                │
+      │                      │                │
+      ▼                      │ need_more      │
+    evaluate_context ────────┘                │
+      │                                        │
+      ▼ sufficient/max_iterations              │
     route_review                               │
-      │                                         │
-      ▼                                         │
+      │                                        │
+      ▼                                        │
     review_functions                           │
-      │                                         │
-      ▼                                         │
+      │                                        │
+      ▼                                        │
     aggregate ◄────────────────────────────────┘
       │
-      ├──────────────┐
-      ▼              ▼
-    publish       notify
-      │              │
-      └──────┬───────┘
-             ▼
-            END
+      ├─ skip ────► END
+      │
+      ▼ continue
+    publish
+      │
+      ▼
+    END
     ```
     """
     graph = StateGraph(ReviewState)
@@ -88,6 +96,12 @@ def create_review_graph() -> StateGraph:
     # =========================================================================
     graph.add_node("build_call_graph", build_call_graph.run)
     graph.add_node("analyze_impact", analyze_impact.run)
+    
+    # =========================================================================
+    # Phase 2.5: External Discovery (evaluator-optimizer pattern)
+    # =========================================================================
+    graph.add_node("discover_externals", discover_externals.run)
+    graph.add_node("evaluate_context", evaluate_context.run)
     
     # =========================================================================
     # Phase 3: Review (LLM-based)
@@ -120,7 +134,20 @@ def create_review_graph() -> StateGraph:
     
     # Phase 2 flow
     graph.add_edge("build_call_graph", "analyze_impact")
-    graph.add_edge("analyze_impact", "route_review")
+    graph.add_edge("analyze_impact", "discover_externals")
+    
+    # Phase 2.5 flow: evaluator-optimizer loop
+    graph.add_edge("discover_externals", "evaluate_context")
+    graph.add_conditional_edges(
+        "evaluate_context",
+        evaluate_context.should_continue,
+        {
+            "need_more": "discover_externals",  # Loop back for more context
+            "sufficient": "route_review",        # Context is sufficient
+            "max_iterations": "route_review",    # Hit iteration limit
+            "no_more_targets": "route_review",   # No more suggestions
+        },
+    )
     
     # Phase 3 flow
     graph.add_edge("route_review", "review_functions")

@@ -356,10 +356,30 @@ class ASTAnalyzer:
         """Parse function calls from code content."""
         import re
         
+        # Extract function name from the first line (def function_name(...))
+        # to exclude self-references
+        function_name = None
+        lines = content.split('\n')
+        if lines:
+            first_line = lines[0].strip()
+            # Match: def function_name( or async def function_name(
+            func_def_match = re.match(r'(?:async\s+)?def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', first_line)
+            if func_def_match:
+                function_name = func_def_match.group(1)
+        
         # Simple regex for function calls
         # Matches: func_name( but not class definitions, etc.
         pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
-        matches = re.findall(pattern, content)
+        
+        # Process line by line to exclude function definition lines
+        matches = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip lines that are function/class definitions
+            if stripped.startswith(('def ', 'async def ', 'class ')):
+                continue
+            # Find matches in this line
+            matches.extend(re.findall(pattern, line))
         
         # Filter out keywords and common constructs
         keywords = {
@@ -370,7 +390,30 @@ class ASTAnalyzer:
             "set", "tuple", "range", "enumerate", "zip", "map", "filter",
         }
         
-        return [m for m in matches if m not in keywords]
+        # Filter and deduplicate
+        filtered = [m for m in matches if m not in keywords]
+        
+        # Exclude the function's own name (self-reference)
+        if function_name:
+            filtered = [m for m in filtered if m != function_name]
+        
+        # Deduplicate while preserving order
+        seen = set()
+        result = []
+        for call in filtered:
+            if call not in seen:
+                seen.add(call)
+                result.append(call)
+        
+        log.debug(
+            "ast_analyzer.parse_calls",
+            function=function_name,
+            total_matches=len(matches),
+            filtered_count=len(result),
+            calls=result[:10],  # Log first 10 for debugging
+        )
+        
+        return result
     
     def find_call_sites(
         self,

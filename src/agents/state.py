@@ -13,14 +13,17 @@ from pydantic import BaseModel, Field
 from ..analysis.call_graph import CallGraph
 from ..analysis.context_builder import FunctionContext, ReviewContext
 from ..analysis.diff_extractor import ChangeType, FileDiff
+from ..analysis.external_discovery import ExternalFile
 from ..analysis.impact_analyzer import FunctionImpact, ImpactLevel, ImpactReport
 from ..core.config import ReviewerConfig
 
 __all__ = [
     "PRContext",
+    "DependencyAnalysis",
     "ReviewComment",
     "ReviewState",
     "FunctionReviewInput",
+    "ExternalFile",
 ]
 
 type Severity = Literal["critical", "warning", "info", "suggestion"]
@@ -42,9 +45,21 @@ class PRContext:
     is_draft: bool = False
 
 
+class DependencyAnalysis(BaseModel):
+    """Information about a dependency that was analyzed for a comment."""
+
+    name: str
+    file: str | None = None
+    behavior_verified: bool = False
+    validation_provided: bool = False
+    summary: str | None = None
+
+    model_config = {"frozen": True}
+
+
 class ReviewComment(BaseModel):
     """A review comment to post to GitHub."""
-    
+
     file: str
     line: int
     severity: Severity
@@ -53,13 +68,20 @@ class ReviewComment(BaseModel):
     suggestion: str | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=0.8)
     agent: str = "function_reviewer"
-    
+
     # Code suggestion with language hint
     code_suggestion: str | None = None
-    
+
     # Context used for this comment
     related_context: list[str] = Field(default_factory=list)
-    
+
+    # Dependencies analyzed for this comment
+    dependencies_analyzed: list[DependencyAnalysis] = Field(default_factory=list)
+
+    # Issue grouping support
+    issue_group: str | None = None
+    related_issues: list[str] = Field(default_factory=list)
+
     model_config = {"frozen": True}
 
 
@@ -90,6 +112,7 @@ class ReviewState(TypedDict, total=False):
     # =========================================================================
     file_diffs: list[FileDiff]
     function_changes: dict[str, dict]  # {func_name: {type, old, new}}
+    file_contents: dict[str, str]  # Map file paths to content
     new_files: list[str]
     deleted_files: list[str]
     
@@ -98,6 +121,15 @@ class ReviewState(TypedDict, total=False):
     # =========================================================================
     call_graph: CallGraph
     impact_report: ImpactReport
+    
+    # =========================================================================
+    # Phase 2.5: External Discovery (evaluator loop state)
+    # =========================================================================
+    external_files: list[ExternalFile]
+    pending_searches: list[str]  # Targets for next discovery iteration
+    context_sufficient: bool  # LLM evaluator result
+    evaluation_iteration: int  # Current iteration count
+    breaking_changes: list[str]
     
     # =========================================================================
     # Phase 3: Review (LLM-based)

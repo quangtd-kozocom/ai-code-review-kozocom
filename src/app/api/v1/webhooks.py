@@ -21,8 +21,6 @@ class GitHubEvent(StrEnum):
     PULL_REQUEST = "pull_request"
     ISSUE_COMMENT = "issue_comment"
     REVIEW_COMMENT = "pull_request_review_comment"
-    INSTALLATION = "installation"
-    INSTALLATION_REPOS = "installation_repositories"
 
 
 @router.post("/github")
@@ -36,7 +34,7 @@ async def github_webhook(
     Handle GitHub webhook events.
 
     Supports:
-    - pull_request: Triggers PR review
+    - pull_request: Triggers PR review (opened, synchronize, reopened)
     - issue_comment: Handles @reviewer commands in PR conversations
     - pull_request_review_comment: Handles @reviewer commands on code lines
     """
@@ -60,43 +58,20 @@ async def github_webhook(
         case GitHubEvent.REVIEW_COMMENT:
             return _handle_review_comment(payload)
 
-        case GitHubEvent.INSTALLATION:
-            return _handle_installation(payload)
-
-        case GitHubEvent.INSTALLATION_REPOS:
-            return _handle_installation_repos(payload)
-
         case _:
             return {"status": "ignored", "event": x_github_event}
 
 
 def _handle_pull_request(payload: dict) -> dict:
-    """Handle pull_request events - trigger PR review or RAG update."""
+    """Handle pull_request events - trigger PR review."""
     action = payload.get("action")
-    pr = payload["pull_request"]
-    repo = payload["repository"]
 
-    # Handle PR merge - trigger RAG incremental update
-    if action == "closed" and pr.get("merged"):
-        log.info(
-            "PR merged - triggering RAG update",
-            pr=pr["number"],
-            repo=repo["full_name"],
-        )
-
-        from ....workers.tasks import update_rag_index
-
-        update_rag_index.delay(
-            owner=repo["owner"]["login"],
-            repo=repo["name"],
-            pr_number=pr["number"],
-            installation_id=payload["installation"]["id"],
-        )
-        return {"status": "rag_update_queued", "pr": pr["number"]}
-
-    # Handle PR opened/synchronized - trigger review
+    # Only handle PR opened/synchronized/reopened
     if action not in ("opened", "synchronize", "reopened"):
         return {"status": "ignored", "action": action}
+
+    pr = payload["pull_request"]
+    repo = payload["repository"]
 
     log.info(
         "PR event received",
@@ -183,57 +158,6 @@ def _handle_review_comment(payload: dict) -> dict:
     )
 
     return {"status": "queued", "type": "review_command"}
-
-
-def _handle_installation(payload: dict) -> dict:
-    """Handle installation events - trigger RAG indexing for all repos."""
-    action = payload.get("action")
-
-    if action != "created":
-        return {"status": "ignored", "action": action}
-
-    installation_id = payload["installation"]["id"]
-    repositories = [r["full_name"] for r in payload.get("repositories", [])]
-
-    log.info(
-        "Installation created - triggering RAG indexing",
-        installation_id=installation_id,
-        repos_count=len(repositories),
-    )
-
-    from ....workers.tasks import index_installation
-
-    index_installation.delay(
-        installation_id=installation_id,
-        repositories=repositories,
-    )
-
-    return {"status": "indexing_queued", "repos": len(repositories)}
-
-
-def _handle_installation_repos(payload: dict) -> dict:
-    """Handle installation_repositories events - repos added/removed."""
-    action = payload.get("action")
-    installation_id = payload["installation"]["id"]
-
-    if action == "added":
-        repositories = [r["full_name"] for r in payload.get("repositories_added", [])]
-
-        log.info(
-            "Repos added to installation - triggering RAG indexing",
-            installation_id=installation_id,
-            repos_count=len(repositories),
-        )
-
-        from ....workers.tasks import index_installation
-
-        index_installation.delay(
-            installation_id=installation_id,
-            repositories=repositories,
-        )
-        return {"status": "indexing_queued", "repos": len(repositories)}
-
-    return {"status": "ignored", "action": action}
 
 
 def _verify_signature(body: bytes, signature: str | None, secret: str) -> bool:

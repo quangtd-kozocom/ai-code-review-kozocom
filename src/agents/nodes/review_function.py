@@ -4,98 +4,28 @@ Reviews individual functions with targeted LLM prompts.
 This is where the actual LLM-based review happens.
 """
 
-import json
-from typing import Any
-
 import structlog
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...analysis.context_builder import FunctionContext
 from ...core.llm import get_llm
+from ..models import AgentFindings
 from ..prompts.function_review import SYSTEM_PROMPT, build_function_review_prompt
 from ..state import FunctionReviewInput, ReviewComment, ReviewState
 
 log = structlog.get_logger()
 
 
-def _parse_llm_response(response: str, file_path: str) -> list[ReviewComment]:
-    """Parse LLM response into ReviewComment objects.
-    
-    Args:
-        response: Raw LLM response string.
-        file_path: File path for the comments.
-        
-    Returns:
-        List of ReviewComment objects.
-    """
-    comments: list[ReviewComment] = []
-    
-    try:
-        # Try to extract JSON from response
-        response = response.strip()
-        
-        # Handle markdown code blocks
-        if response.startswith("```"):
-            lines = response.split("\n")
-            json_lines = []
-            in_block = False
-            for line in lines:
-                if line.startswith("```"):
-                    in_block = not in_block
-                elif in_block:
-                    json_lines.append(line)
-            response = "\n".join(json_lines)
-        
-        data = json.loads(response)
-        findings = data.get("findings", [])
-        
-        for finding in findings:
-            # Validate required fields
-            if not all(k in finding for k in ["line", "severity", "message"]):
-                log.warning(
-                    "review_function.invalid_finding",
-                    missing_keys=[k for k in ["line", "severity", "message"] if k not in finding],
-                )
-                continue
-            
-            # Validate severity
-            severity = finding["severity"]
-            if severity not in ("critical", "warning", "info", "suggestion"):
-                severity = "warning"
-            
-            comments.append(ReviewComment(
-                file=file_path,
-                line=int(finding["line"]),
-                severity=severity,
-                category="logic",  # Default category
-                message=finding["message"],
-                suggestion=finding.get("suggestion"),
-                confidence=float(finding.get("confidence", 0.8)),
-                agent="function_reviewer",
-            ))
-    
-    except json.JSONDecodeError as e:
-        log.error(
-            "review_function.parse_failed",
-            error=str(e),
-            response_preview=response[:200],
-        )
-    except Exception as e:
-        log.error(
-            "review_function.parse_error",
-            error=str(e),
-        )
-    
-    return comments
-
-
 async def review_single_function(
     review_input: FunctionReviewInput,
+    external_files: list | None = None,
+    breaking_changes: list[str] | None = None,
 ) -> list[ReviewComment]:
     """Review a single function using LLM.
     
     Args:
         review_input: Function review input with context.
+        external_files: External files that depend on this code.
+        breaking_changes: List of detected breaking changes.
         
     Returns:
         List of review comments.
@@ -119,7 +49,36 @@ async def review_single_function(
         }
         for c in ctx.callers[:5]  # Limit to 5 callers
     ]
+
+    # Build callees dict for prompt
+    callees_data = [
+        {
+            "name": c.name,
+            "file_path": c.file_path,
+            "source_code": c.source_code,
+            "signature": c.signature,
+            "has_validation": c.has_validation,
+            "returns_optional": c.returns_optional,
+        }
+        for c in ctx.callees
+    ]
     
+    # Build external files dict for prompt
+    external_files_data = None
+    if external_files:
+        external_files_data = [
+            {
+                "path": f.path,
+                "usage_type": f.usage_type,
+                "references": f.references,
+                "will_break": f.will_break,
+                "break_reason": f.break_reason,
+                "affected_lines": f.affected_lines,
+            }
+            for f in external_files
+            if ctx.name in f.references  # Only include files that reference this function
+        ]
+
     # Build prompt
     prompt = build_function_review_prompt(
         function_name=ctx.name,
@@ -130,10 +89,12 @@ async def review_single_function(
         new_code=ctx.new_code,
         diff=ctx.diff,
         callers=callers_data,
-        callees=ctx.callees,
+        callees=callees_data,
         review_questions=ctx.review_questions,
         focus_areas=review_input.focus_areas,
         review_depth=review_input.review_depth,
+        external_files=external_files_data,
+        breaking_changes=breaking_changes,
     )
     
     # Log first prompt with dependency context for debugging
@@ -155,19 +116,29 @@ async def review_single_function(
             prompt=prompt,
         )
     
-    # Call LLM
-    llm = get_llm()
+    # Call LLM with structured output
+    llm = get_llm().with_structured_output(AgentFindings)
     
     try:
-        messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=prompt),
-        ]
+        # Combine system prompt and user prompt
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
         
-        response = await llm.ainvoke(messages)
-        content = response.content if hasattr(response, "content") else str(response)
+        # Get structured output
+        result = await llm.ainvoke(full_prompt)
         
-        comments = _parse_llm_response(content, ctx.file_path)
+        # Convert AgentFindings to ReviewComments
+        comments = []
+        for finding in result.findings:
+            comments.append(ReviewComment(
+                file=ctx.file_path,
+                line=finding.line,
+                severity=finding.severity,
+                category="logic",  # Default category
+                message=finding.message,
+                suggestion=finding.suggestion,
+                confidence=finding.confidence,
+                agent="function_reviewer",
+            ))
         
         log.debug(
             "review_function.complete",
@@ -191,6 +162,7 @@ async def run(state: ReviewState) -> dict:
     
     Phase 3b: LLM-based review
     - Review each function with targeted prompts
+    - Include external files context for complete picture
     - Collect all findings
     
     This node uses LLM for actual code review.
@@ -211,9 +183,15 @@ async def run(state: ReviewState) -> dict:
         log.info("review_functions.skipped", reason="no_functions")
         return {"comments": []}
     
+    # Get external context from state
+    external_files = state.get("external_files", [])
+    breaking_changes = state.get("breaking_changes", [])
+    
     log.info(
         "review_functions.started",
         count=len(functions_to_review),
+        external_files_available=len(external_files),
+        breaking_changes_detected=len(breaking_changes),
     )
     
     all_comments: list[ReviewComment] = []
@@ -221,7 +199,11 @@ async def run(state: ReviewState) -> dict:
     # Review each function
     # Note: Could be parallelized with asyncio.gather for performance
     for review_input in functions_to_review:
-        comments = await review_single_function(review_input)
+        comments = await review_single_function(
+            review_input,
+            external_files=external_files,
+            breaking_changes=breaking_changes,
+        )
         all_comments.extend(comments)
     
     log.info(

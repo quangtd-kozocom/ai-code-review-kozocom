@@ -14,13 +14,25 @@ log = structlog.get_logger()
 
 
 def _is_trivial_change(impact: FunctionImpact) -> bool:
-    """Detect trivial changes that don't need review."""
+    """Detect trivial changes that don't need review.
+    
+    Note: We only mark as trivial if we have high confidence.
+    If call graph data is missing (caller_count == 0 but we don't know why),
+    we err on the side of caution and review the function.
+    """
     match impact.impact_level:
         case ImpactLevel.TRIVIAL:
+            # Explicitly marked as trivial by impact analyzer
             return True
         case ImpactLevel.LOW if not impact.signature_changed:
             # Low impact without signature change might be trivial
-            return impact.caller_count == 0
+            # BUT: Only skip if we have call graph data confirming no callers
+            # If caller_count is 0 due to missing call graph, don't skip
+            # (Better to review too much than miss issues)
+            # 
+            # Since we can't reliably tell the difference, default to False
+            # to avoid skipping functions when call graph is empty
+            return False
         case _:
             return False
 

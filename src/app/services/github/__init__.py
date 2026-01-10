@@ -19,25 +19,28 @@ from .client import GitHubClient, create_github_client
 from .comments import CommentService
 from .files import FileService
 from .pr import PRService
+from .search import SearchService
 
 __all__ = [
     "GitHubClient",
     "PRService",
     "FileService",
     "CommentService",
+    "SearchService",
     "GitHubService",
     "create_github_client",
     "create_github_service",
 ]
 
 
-class GitHubService(PRService, FileService, CommentService):
+class GitHubService(PRService, FileService, CommentService, SearchService):
     """Combined GitHub service using multiple inheritance.
 
     Inherits all operations from:
     - PRService: get_pr_files, get_pr_details, create_review
     - FileService: get_file_raw, get_file_content_at_pr
     - CommentService: create_pr_comment, create_issue_comment, etc.
+    - SearchService: search_code
 
     All share the same GitHubClient base (auth, token, HTTP client).
     """

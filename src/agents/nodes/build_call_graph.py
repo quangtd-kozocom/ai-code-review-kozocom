@@ -24,7 +24,7 @@ async def run(state: ReviewState) -> dict:
     This node does NOT use LLM - it's purely AST-based.
     
     Args:
-        state: Current workflow state with file_diffs and function_changes.
+        state: Current workflow state with file_diffs, function_changes, and file_contents.
         
     Returns:
         State update with call_graph.
@@ -34,48 +34,35 @@ async def run(state: ReviewState) -> dict:
         return {"call_graph": CallGraph()}
     
     ctx = state["pr_context"]
-    diffs = state.get("file_diffs", [])
+    file_contents = state.get("file_contents", {})
     
-    if not diffs:
-        log.info("build_call_graph.skipped", reason="no_diffs")
+    if not file_contents:
+        log.info("build_call_graph.skipped", reason="no_file_contents")
         return {"call_graph": CallGraph()}
     
     log.info(
         "build_call_graph.started",
         owner=ctx.owner,
         repo=ctx.repo,
-        files=len(diffs),
+        files=len(file_contents),
+        file_paths=list(file_contents.keys()),
     )
     
-    async with GitHubService(ctx.installation_id) as github:
-        builder = CallGraphBuilder(github_client=github)
-        
-        # Prepare file info for call graph builder
-        changed_files = [
-            {
-                "file_path": diff.file_path,
-                "head_content": diff.head_content,
-                "base_content": diff.base_content,
-            }
-            for diff in diffs
-            if diff.head_content  # Only files with content
-        ]
-        
-        # Build call graph
-        call_graph = await builder.build_for_changes(
-            owner=ctx.owner,
-            repo=ctx.repo,
-            changed_files=changed_files,
-            base_ref=ctx.base_branch,
-            head_ref=ctx.head_branch,
-        )
-        
-        log.info(
-            "build_call_graph.complete",
-            functions=len(call_graph.relations),
-            total_callers=sum(
-                len(r.callers) for r in call_graph.relations.values()
-            ),
-        )
-        
-        return {"call_graph": call_graph}
+    # Build call graph from in-memory file contents
+    # This correctly finds all functions and their relationships
+    builder = CallGraphBuilder()
+    call_graph = builder.build_from_content(file_contents)
+    
+    log.info(
+        "build_call_graph.complete",
+        functions=len(call_graph.relations),
+        function_names=list(call_graph.relations.keys())[:10],  # Log first 10
+        total_callers=sum(
+            len(r.callers) for r in call_graph.relations.values()
+        ),
+        total_callees=sum(
+            len(r.callees) for r in call_graph.relations.values()
+        ),
+    )
+    
+    return {"call_graph": call_graph}

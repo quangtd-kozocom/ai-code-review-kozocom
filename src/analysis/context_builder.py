@@ -10,6 +10,7 @@ import structlog
 
 from .ast_analyzer import FunctionDefinition
 from .call_graph import CallGraph, FunctionCall
+from .callee_resolver import CalleeInfo, CalleeResolver
 from .diff_extractor import ChangeType, FileDiff
 from .impact_analyzer import FunctionImpact, ImpactLevel, ImpactReport
 
@@ -19,21 +20,21 @@ log = structlog.get_logger()
 @dataclass(slots=True)
 class FunctionContext:
     """Context for reviewing a single function."""
-    
+
     name: str
     file_path: str
     change_type: ChangeType
     impact_level: ImpactLevel
-    
+
     # Code content
     old_code: str | None = None
     new_code: str | None = None
     diff: str | None = None
-    
+
     # Relationships
     callers: list[FunctionCall] = field(default_factory=list)
-    callees: list[str] = field(default_factory=list)
-    
+    callees: list[CalleeInfo] = field(default_factory=list)
+
     # Metadata
     signature_changed: bool = False
     has_tests: bool = False
@@ -96,7 +97,7 @@ class FunctionContext:
         if self.callees:
             lines.extend([
                 f"### Calls ({len(self.callees)}):",
-                ", ".join(f"`{c}`" for c in self.callees[:10]),
+                ", ".join(f"`{c.name}`" for c in self.callees[:10]),
                 "",
             ])
         
@@ -191,12 +192,15 @@ class ReviewContext:
 
 class ContextBuilder:
     """Assemble review context from analysis results.
-    
+
     Combines diff extraction, call graph, and impact analysis
     into targeted context for LLM review.
     """
-    
-    def build(
+
+    def __init__(self):
+        self.callee_resolver = CalleeResolver()
+
+    async def build(
         self,
         owner: str,
         repo: str,
@@ -207,9 +211,10 @@ class ContextBuilder:
         call_graph: CallGraph,
         impact_report: ImpactReport,
         function_changes: dict[str, dict],
+        file_contents: dict[str, str],
     ) -> ReviewContext:
         """Build review context from analysis results.
-        
+
         Args:
             owner: Repository owner.
             repo: Repository name.
@@ -220,7 +225,8 @@ class ContextBuilder:
             call_graph: Call graph from call graph builder.
             impact_report: Impact report from impact analyzer.
             function_changes: Function changes from AST comparison.
-            
+            file_contents: Dictionary of file paths to their content.
+
         Returns:
             ReviewContext ready for LLM review.
         """
@@ -240,8 +246,8 @@ class ContextBuilder:
         
         # Build function contexts
         for impact in impact_report.functions:
-            func_ctx = self._build_function_context(
-                impact, diffs, call_graph, function_changes
+            func_ctx = await self._build_function_context(
+                impact, diffs, call_graph, function_changes, file_contents
             )
             context.functions.append(func_ctx)
         
@@ -268,27 +274,28 @@ class ContextBuilder:
         
         return context
     
-    def _build_function_context(
+    async def _build_function_context(
         self,
         impact: FunctionImpact,
         diffs: list[FileDiff],
         call_graph: CallGraph,
         function_changes: dict[str, dict],
+        file_contents: dict[str, str],
     ) -> FunctionContext:
         """Build context for a single function."""
         change_info = function_changes.get(impact.name, {})
-        
+
         # Get code content
         old_code = None
         new_code = None
         diff_content = None
-        
+
         if old_func := change_info.get("old"):
             old_code = old_func.content
-        
+
         if new_func := change_info.get("new"):
             new_code = new_func.content
-        
+
         # Find diff for this function's file
         for diff in diffs:
             if diff.file_path == impact.file_path:
@@ -296,16 +303,19 @@ class ContextBuilder:
                     diff, impact.name, old_code, new_code
                 )
                 break
-        
+
         # Get relationships
         callers = call_graph.get_callers(impact.name)
-        callees = call_graph.get_callees(impact.name)
-        
-        # Generate review questions
-        questions = self._generate_review_questions(
-            impact, change_info, callers
+        callee_names = call_graph.get_callees(impact.name)
+
+        # Resolve callee source code
+        callees = await self.callee_resolver.resolve_callees(
+            callee_names, call_graph, file_contents
         )
-        
+
+        # Generate review questions
+        questions = self._generate_review_questions(impact, change_info, callers)
+
         return FunctionContext(
             name=impact.name,
             file_path=impact.file_path,

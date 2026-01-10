@@ -39,24 +39,25 @@ async def run(state: ReviewState) -> dict:
     diffs = state.get("file_diffs", [])
     call_graph = state.get("call_graph", CallGraph())
     function_changes = state.get("function_changes", {})
-    
+    file_contents = state.get("file_contents", {})
+
     if not function_changes:
         log.info("analyze_impact.skipped", reason="no_function_changes")
         return {"impact_report": ImpactReport()}
-    
+
     log.info(
         "analyze_impact.started",
         functions=len(function_changes),
         files=len(diffs),
     )
-    
+
     # Run impact analysis
     analyzer = ImpactAnalyzer()
     report = analyzer.analyze(diffs, call_graph, function_changes)
-    
+
     # Build review context
     context_builder = ContextBuilder()
-    review_context = context_builder.build(
+    review_context = await context_builder.build(
         owner=ctx.owner,
         repo=ctx.repo,
         pr_number=ctx.pr_number,
@@ -66,6 +67,7 @@ async def run(state: ReviewState) -> dict:
         call_graph=call_graph,
         impact_report=report,
         function_changes=function_changes,
+        file_contents=file_contents,
     )
     
     log.info(

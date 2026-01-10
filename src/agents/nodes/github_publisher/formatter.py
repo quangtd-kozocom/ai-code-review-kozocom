@@ -41,6 +41,25 @@ class CommentFormatter:
             comment.message,
         ]
 
+        # Show dependencies analyzed
+        if comment.dependencies_analyzed:
+            lines.extend([
+                "",
+                "<details>",
+                "<summary>🔍 <b>Dependencies Analyzed</b></summary>",
+                "",
+            ])
+            for dep in comment.dependencies_analyzed:
+                status = "✅" if dep.behavior_verified else "❓"
+                lines.append(f"- {status} `{dep.name}`")
+                if dep.file:
+                    lines.append(f"  - File: `{dep.file}`")
+                if dep.validation_provided:
+                    lines.append("  - Has input validation")
+                if dep.summary:
+                    lines.append(f"  - {dep.summary}")
+            lines.extend(["", "</details>"])
+
         # Show RAG context sources if available
         if comment.related_context:
             lines.extend([
@@ -52,6 +71,13 @@ class CommentFormatter:
             for ref in comment.related_context[:3]:
                 lines.append(f"- `{ref}`")
             lines.extend(["", "</details>"])
+
+        # Show grouped issues indicator
+        if comment.issue_group and comment.related_issues:
+            lines.extend([
+                "",
+                f"*This comment consolidates {len(comment.related_issues)} related {comment.issue_group.replace('_', ' ')} issues.*",
+            ])
 
         # Recommendation
         if comment.suggestion:
