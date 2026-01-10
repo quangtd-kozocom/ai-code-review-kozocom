@@ -1,19 +1,20 @@
 [project]
 name = "ai-code-reviewer"
-version = "0.1.0"
-requires-python = ">=3.13"
+version = "0.3.0"
+requires-python = ">=3.14"
+description = "AI-powered code review agent with breaking change detection"
 
 dependencies = [
     # FastAPI
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "pydantic>=2.10.0",
-    "pydantic-settings>=2.6.0",
-    # LangGraph + LLM
-    "langgraph>=0.2.55",
-    "langchain>=0.3.13",
-    "langchain-openai>=0.2.14",
-    "langchain-anthropic>=0.3.0",
+    "fastapi>=0.116.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.7.0",
+    # LangGraph + LLM (updated to latest)
+    "langgraph>=1.0.0",
+    "langchain>=0.3.18",
+    "langchain-openai>=0.3.5",
+    "langchain-anthropic>=0.3.5",
     # GitHub
     "httpx>=0.28.0",
     "PyJWT>=2.10.0",
@@ -27,40 +28,36 @@ dependencies = [
     # YAML parsing
     "pyyaml>=6.0.2",
     # Slack
-    "slack-sdk>=3.33.0",
+    "slack-sdk>=3.34.0",
     # Utilities
-    "structlog>=24.4.0",
+    "structlog>=25.1.0",
     "python-dotenv>=1.0.0",
     "tenacity>=9.0.0",
-    "sentry-sdk[fastapi]>=2.19.0",
+    "sentry-sdk[fastapi]>=2.20.0",
     "aiohttp>=3.13.3",
-    # RAG - Vector Database & Embeddings
-    "pinecone>=5.0.0",
-    "google-genai>=1.0.0",
-    # RAG - AST Parsing (tree-sitter-language-pack supports Python 3.13+)
+    # AST Parsing (tree-sitter-language-pack supports Python 3.13+)
     "tree-sitter>=0.24.0",
     "tree-sitter-language-pack>=0.7.0",
-    # RAG - Git Operations
-    "gitpython>=3.1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.8.0",
-    "mypy>=1.13.0",
+    "pytest>=9.0.0",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.0",
+    "mypy>=1.15.0",
 ]
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/chat/prompts.py" = ["E501"]  # LLM prompt templates with long example lines
+"src/agents/prompts/*.py" = ["E501"]  # LLM prompt templates
 
 [dependency-groups]
 dev = [

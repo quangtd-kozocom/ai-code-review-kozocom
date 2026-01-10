@@ -72,3 +72,47 @@ class CommentService(GitHubClient):
         reply_id = resp.json()["id"]
         log.info("Review comment reply created", reply_id=reply_id)
         return reply_id
+
+    async def create_pr_review_comment(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        body: str,
+        path: str,
+        line: int,
+        side: str = "RIGHT",
+    ) -> dict:
+        """Create a review comment on a specific line in a PR.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            pr_number: Pull request number.
+            body: Comment body (markdown supported).
+            path: File path relative to repo root.
+            line: Line number in the diff.
+            side: Which side of diff (LEFT=old, RIGHT=new).
+
+        Returns:
+            Created comment data including id.
+        """
+        # First get the latest commit SHA for the PR
+        pr_resp = await self._api_get(f"/repos/{owner}/{repo}/pulls/{pr_number}")
+        pr_resp.raise_for_status()
+        commit_sha = pr_resp.json()["head"]["sha"]
+
+        resp = await self._api_post(
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+            json={
+                "body": body,
+                "commit_id": commit_sha,
+                "path": path,
+                "line": line,
+                "side": side,
+            },
+        )
+        resp.raise_for_status()
+        comment = resp.json()
+        log.info("PR review comment created", comment_id=comment["id"], path=path, line=line)
+        return comment

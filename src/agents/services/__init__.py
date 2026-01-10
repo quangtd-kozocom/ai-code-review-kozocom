@@ -1,5 +1,3 @@
-"""Agent services module."""
+"""Agent services module (v2)."""
 
-from .rag_enricher import RAGEnricher, create_rag_enricher
-
-__all__ = ["RAGEnricher", "create_rag_enricher"]
+__all__: list[str] = []

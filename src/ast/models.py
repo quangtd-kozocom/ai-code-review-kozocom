@@ -1,14 +1,18 @@
 """AST data models."""
 
+import json
 from dataclasses import dataclass, field
 from typing import Literal
 
+type ChunkType = Literal["function", "class", "method", "import", "module", "module_header"]
+type RelationshipType = Literal["caller", "callee", "similar", "test", "sibling", "transitive"]
 
-@dataclass
+
+@dataclass(slots=True)
 class CodeChunk:
     """Represents a parseable unit of code."""
 
-    chunk_type: Literal["function", "class", "method", "import", "module"]
+    chunk_type: ChunkType
     name: str
     content: str
     file_path: str
@@ -16,22 +20,38 @@ class CodeChunk:
     end_line: int
     language: str
 
-    # Optional metadata
-    signature: str | None = None
-    docstring: str | None = None
-    dependencies: list[str] = field(default_factory=list)
-
-    # Relationship data for RAG v2
-    imports: list[str] = field(default_factory=list)  # File-level imports
-    calls: list[str] = field(default_factory=list)  # Function calls in this chunk
+    signature: str | None = field(default=None, kw_only=True)
+    docstring: str | None = field(default=None, kw_only=True)
+    dependencies: list[str] = field(default_factory=list, kw_only=True)
+    parameters: list["ParameterInfo"] = field(default_factory=list, kw_only=True)
+    imports: list[str] = field(default_factory=list, kw_only=True)
+    calls: list[str] = field(default_factory=list, kw_only=True)
 
     @property
     def id(self) -> str:
         """Generate unique ID for this chunk."""
         return f"{self.file_path}:{self.name}:{self.start_line}"
 
-    def to_embedding_text(self) -> str:
-        """Convert chunk to text for embedding."""
+    @property
+    def parameters_json(self) -> str | None:
+        """Serialize parameters to JSON string."""
+        if not self.parameters:
+            return None
+        return json.dumps(
+            [
+                {
+                    "name": p.name,
+                    "type_hint": p.type_hint,
+                    "default_value": p.default_value,
+                    "is_variadic": p.is_variadic,
+                    "is_keyword": p.is_keyword,
+                }
+                for p in self.parameters
+            ]
+        )
+
+    def to_context_text(self) -> str:
+        """Convert chunk to text for LLM context."""
         parts = [f"{self.chunk_type}: {self.name}"]
         if self.signature:
             parts.append(f"Signature: {self.signature}")
@@ -54,17 +74,13 @@ class ParameterInfo:
 
 @dataclass(slots=True)
 class FunctionInfo:
-    """Information about a function/method.
-
-    Enhanced with Python 3.13 features for comprehensive AST extraction.
-    """
+    """Information about a function/method."""
 
     name: str
     signature: str | None
     start_line: int
     end_line: int
 
-    # Enhanced fields for RAG context
     parameters: list[ParameterInfo] = field(default_factory=list)
     return_type: str | None = None
     decorators: list[str] = field(default_factory=list)
@@ -92,17 +108,13 @@ class FunctionInfo:
 
 @dataclass(slots=True)
 class ClassInfo:
-    """Information about a class.
-
-    Enhanced with inheritance and decorator info for RAG context.
-    """
+    """Information about a class."""
 
     name: str
     methods: list[str]
     start_line: int
     end_line: int
 
-    # Enhanced fields
     base_classes: list[str] = field(default_factory=list)
     decorators: list[str] = field(default_factory=list)
     docstring: str | None = None
@@ -127,12 +139,10 @@ class ASTInfo:
     functions: list[FunctionInfo]
     classes: list[ClassInfo]
     imports: list[str]
-
-    # Identified from diff
     changed_entities: list[str] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(slots=True)
 class RelatedCode:
     """Related code retrieved from RAG."""
 
@@ -141,6 +151,6 @@ class RelatedCode:
     content: str
     chunk_type: str
     relevance_score: float
-    relationship: str  # "caller", "callee", "similar", "test"
+    relationship: RelationshipType
     start_line: int = 0
     end_line: int = 0
