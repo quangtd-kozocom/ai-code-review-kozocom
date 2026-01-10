@@ -49,8 +49,8 @@ DEFAULT_HTTP_TIMEOUT: float = 30.0
 SLACK_MESSAGE_CHAR_LIMIT: int = 2000
 
 # Celery Configuration
-CELERY_TASK_TIME_LIMIT: int = 300  # seconds
-CELERY_TASK_SOFT_TIME_LIMIT: int = 280  # seconds
+CELERY_TASK_TIME_LIMIT: int = 600  # 10 minutes
+CELERY_TASK_SOFT_TIME_LIMIT: int = 580  # 10 minutes - buffer
 CELERY_PR_RETRY_COUNTDOWN: int = 60  # seconds
 CELERY_COMMAND_RETRY_COUNTDOWN: int = 30  # seconds
 

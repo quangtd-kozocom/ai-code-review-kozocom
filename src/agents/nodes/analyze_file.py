@@ -2,7 +2,7 @@
 
 import structlog
 
-from ...core.llm import get_structured_llm
+from ...core.llm import get_structured_llm, invoke_with_retry
 from ..constants import FILE_ADDED, FILE_DELETED
 from ..models import FileAnalysisResult
 from ..prompts.analyze_file import ANALYZE_FILE_PROMPT
@@ -68,7 +68,7 @@ async def run(state: ReviewState) -> dict:
     llm = get_structured_llm(FileAnalysisResult)
 
     try:
-        result: FileAnalysisResult = await llm.ainvoke(prompt)
+        result: FileAnalysisResult = await invoke_with_retry(llm, prompt)
         log.debug(
             "analyze_file.llm_response",
             file=current_file.file_path,

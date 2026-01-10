@@ -2,7 +2,7 @@
 
 import structlog
 
-from ...core.llm import get_structured_llm
+from ...core.llm import get_structured_llm, invoke_with_retry
 from ..models import SearchPlanResult
 from ..prompts.plan_search import PLAN_SEARCH_PROMPT
 from ..state import ReviewState, SearchPlan
@@ -77,7 +77,7 @@ async def run(state: ReviewState) -> dict:
     llm = get_structured_llm(SearchPlanResult)
 
     try:
-        result: SearchPlanResult = await llm.ainvoke(prompt)
+        result: SearchPlanResult = await invoke_with_retry(llm, prompt)
         log.debug(
             "plan_search.llm_response",
             entity=change.entity_name,

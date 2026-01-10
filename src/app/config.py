@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     GITHUB_PRIVATE_KEY: str
     GITHUB_WEBHOOK_SECRET: str
 
+    # LLM Providers (priority: Google -> OpenRouter -> OpenAI -> Anthropic)
+    GOOGLE_API_KEY: str | None = None
+    GOOGLE_DEFAULT_MODEL: str = "gemini-2.0-flash"
+
     OPENROUTER_API_KEY: str | None = None
     OPENROUTER_DEFAULT_MODEL: str = "xiaomi/mimo-v2-flash:free"
 
