@@ -105,7 +105,7 @@ async def _run_ripgrep(
     """Run ripgrep with given parameters."""
     # Unescape LLM output then re-escape for ripgrep regex
     clean = re.sub(r"\\(.)", r"\1", query)
-    pattern = re.escape(clean)
+    escaped = re.escape(clean)
 
     cmd = [
         "rg",
@@ -116,19 +116,19 @@ async def _run_ripgrep(
     ]
 
     # Add include patterns
-    for pattern in include_patterns:
-        cmd.extend(["--glob", pattern])
+    for pat in include_patterns:
+        cmd.extend(["--glob", pat])
 
     # Add exclude patterns
-    for pattern in exclude_patterns:
-        cmd.extend(["--glob", f"!{pattern}"])
+    for pat in exclude_patterns:
+        cmd.extend(["--glob", f"!{pat}"])
 
     # Always exclude common noise directories
     for noise in SEARCH_EXCLUDE_DIRS:
         cmd.extend(["--glob", f"!{noise}"])
 
     # Add query and path
-    cmd.extend([pattern, repo_path])
+    cmd.extend([escaped, repo_path])
 
     try:
         process = await asyncio.create_subprocess_exec(
