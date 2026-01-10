@@ -2,11 +2,15 @@
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import structlog
 
 from .ast_analyzer import ASTAnalyzer, get_ast_analyzer
 from .call_graph import CallGraph
+
+if TYPE_CHECKING:
+    from ..app.services.github import GitHubService
 
 log = structlog.get_logger()
 
@@ -38,6 +42,10 @@ class CalleeResolver:
         callee_names: list[str],
         call_graph: CallGraph,
         file_contents: dict[str, str],
+        github_service: "GitHubService | None" = None,
+        owner: str | None = None,
+        repo: str | None = None,
+        ref: str | None = None,
     ) -> list[CalleeInfo]:
         """Resolve source code for callees.
 
@@ -45,6 +53,10 @@ class CalleeResolver:
             callee_names: List of function names called by the target function.
             call_graph: Current call graph with file mappings.
             file_contents: Pre-fetched file contents from PR.
+            github_service: Optional GitHub service for fetching external files.
+            owner: Repository owner (required if github_service provided).
+            repo: Repository name (required if github_service provided).
+            ref: Git ref to fetch from (required if github_service provided).
 
         Returns:
             List of CalleeInfo with source code.
@@ -72,7 +84,7 @@ class CalleeResolver:
                 continue
 
             info = await self._resolve_single_callee(
-                name, call_graph, file_contents
+                name, call_graph, file_contents, github_service, owner, repo, ref
             )
             if info:
                 self._cache[name] = info
@@ -97,6 +109,10 @@ class CalleeResolver:
         name: str,
         call_graph: CallGraph,
         file_contents: dict[str, str],
+        github_service: "GitHubService | None" = None,
+        owner: str | None = None,
+        repo: str | None = None,
+        ref: str | None = None,
     ) -> CalleeInfo | None:
         """Resolve a single callee."""
         log.debug(
@@ -145,12 +161,75 @@ class CalleeResolver:
                 )
                 return info
 
-        # Could not find the callee in available files
+        # Try to fetch from GitHub if service is available
+        if github_service and owner and repo and ref:
+            log.info(
+                "callee_resolver.trying_github_search",
+                callee=name,
+                owner=owner,
+                repo=repo,
+            )
+            
+            try:
+                # Search for the function in the repository
+                search_results = await github_service.search_code(
+                    owner=owner,
+                    repo=repo,
+                    query=f"function {name} OR def {name}",
+                )
+                
+                # Try to fetch and analyze the first few results
+                for result in search_results[:3]:  # Limit to first 3 results
+                    try:
+                        file_path = result.get("path")
+                        if not file_path:
+                            continue
+                        
+                        log.debug(
+                            "callee_resolver.fetching_from_github",
+                            callee=name,
+                            file_path=file_path,
+                        )
+                        
+                        # Fetch file content
+                        content = await github_service.get_file_content(
+                            owner=owner,
+                            repo=repo,
+                            path=file_path,
+                            ref=ref,
+                        )
+                        
+                        if content:
+                            info = self._extract_callee_info(name, file_path, content)
+                            if info.source_code:
+                                log.info(
+                                    "callee_resolver.resolved_from_github",
+                                    callee=name,
+                                    file_path=file_path,
+                                )
+                                return info
+                    except Exception as e:
+                        log.warning(
+                            "callee_resolver.github_fetch_failed",
+                            callee=name,
+                            file_path=file_path,
+                            error=str(e),
+                        )
+                        continue
+            except Exception as e:
+                log.warning(
+                    "callee_resolver.github_search_failed",
+                    callee=name,
+                    error=str(e),
+                )
+        
+        # Could not find the callee in available files or GitHub
         log.warning(
             "callee_resolver.not_found",
             callee=name,
             searched_files=len(file_contents),
             file_paths=list(file_contents.keys()),
+            tried_github=github_service is not None,
         )
         return CalleeInfo(name=name, file_path=None, source_code=None)
 

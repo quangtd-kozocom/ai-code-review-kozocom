@@ -1,54 +1,41 @@
-"""Extract diff node - Phase 1 of the review pipeline.
-
-Parses PR diff and identifies changed code units without using LLM.
-This is a deterministic operation using AST analysis.
-"""
+"""Extract diff node - fetches PR files from GitHub."""
 
 import structlog
 
-from ...analysis.ast_analyzer import get_ast_analyzer
-from ...analysis.diff_extractor import ChangeType, DiffExtractor
-from ...app.services.github import GitHubService
-from ...core.config import ReviewerConfig
-from ..state import ReviewState
+from ...analysis.diff_extractor import DiffExtractor
+from ...app.services.github import create_github_service
+from ..constants import CODE_EXTENSIONS
+from ..state import FileDiff, ReviewState
 
 log = structlog.get_logger()
 
 
 async def run(state: ReviewState) -> dict:
-    """Extract and analyze PR diff.
-    
-    Phase 1 of the 3-phase review pipeline:
-    1. Fetch PR files from GitHub
-    2. Parse diffs into structured format
-    3. Extract changed functions using AST
-    4. Identify new/deleted files
-    
-    This node does NOT use LLM - it's purely deterministic.
-    
+    """Extract and parse PR diff from GitHub.
+
+    Fetches all changed files in the PR with their content
+    for both base and head branches.
+
     Args:
         state: Current workflow state with pr_context.
-        
+
     Returns:
-        State updates with file_diffs, function_changes, etc.
+        State updates with file_diffs.
     """
     ctx = state["pr_context"]
-    config: ReviewerConfig = state.get("repo_config", ReviewerConfig())
-    
+
     log.info(
         "extract_diff.started",
         owner=ctx.owner,
         repo=ctx.repo,
         pr=ctx.pr_number,
-        base=ctx.base_branch,
-        head=ctx.head_branch,
+        base_branch=ctx.base_branch,
+        head_branch=ctx.head_branch,
     )
-    
-    async with GitHubService(ctx.installation_id) as github:
-        # Create diff extractor
+
+    async with create_github_service(ctx.installation_id) as github:
         extractor = DiffExtractor(github)
-        
-        # Extract diffs from PR
+
         diffs = await extractor.extract(
             ctx.owner,
             ctx.repo,
@@ -56,86 +43,52 @@ async def run(state: ReviewState) -> dict:
             ctx.base_branch,
             ctx.head_branch,
         )
-        
-        # Filter based on config
-        filtered_diffs = [
-            d for d in diffs
-            if not config.should_ignore(d.file_path)
+
+        # Convert to our FileDiff dataclass
+        file_diffs = [
+            FileDiff(
+                file_path=d.file_path,
+                status=d.status.value,
+                base_content=d.base_content,
+                head_content=d.head_content,
+                patch=d.patch,
+                language=d.language,
+            )
+            for d in diffs
         ]
-        
-        # Check if PR should be skipped
-        if not filtered_diffs:
-            log.info("extract_diff.skipped", reason="no_relevant_files")
-            return {
-                "skip_review": True,
-                "skip_reason": "No relevant files to review",
-                "file_diffs": [],
-                "function_changes": {},
-                "new_files": [],
-                "deleted_files": [],
-            }
-        
-        # Analyze function changes using AST
-        analyzer = get_ast_analyzer()
-        function_changes: dict[str, dict] = {}
-        new_files: list[str] = []
-        deleted_files: list[str] = []
-        file_contents: dict[str, str] = {}  # Map file paths to their content
 
-        for diff in filtered_diffs:
-            match diff.status:
-                case ChangeType.ADDED:
-                    new_files.append(diff.file_path)
-                    # Extract functions from new file
-                    if diff.head_content:
-                        file_contents[diff.file_path] = diff.head_content
-                        funcs = analyzer.extract_functions(
-                            diff.file_path, diff.head_content
-                        )
-                        for func in funcs:
-                            function_changes[func.name] = {
-                                "type": "added",
-                                "new": func,
-                            }
+    total_files = len(file_diffs)
 
-                case ChangeType.DELETED:
-                    deleted_files.append(diff.file_path)
-                    # Extract functions from deleted file
-                    if diff.base_content:
-                        file_contents[diff.file_path] = diff.base_content
-                        funcs = analyzer.extract_functions(
-                            diff.file_path, diff.base_content
-                        )
-                        for func in funcs:
-                            function_changes[func.name] = {
-                                "type": "deleted",
-                                "old": func,
-                            }
+    # Filter out non-code files
+    file_diffs = [
+        f for f in file_diffs
+        if any(f.file_path.endswith(ext) for ext in CODE_EXTENSIONS)
+    ]
 
-                case ChangeType.MODIFIED | ChangeType.RENAMED:
-                    # Compare functions between versions
-                    if diff.base_content and diff.head_content:
-                        file_contents[diff.file_path] = diff.head_content
-                        changes = analyzer.compare_functions(
-                            diff.base_content,
-                            diff.head_content,
-                            diff.file_path,
-                        )
-                        function_changes.update(changes)
-        
+    code_files = len(file_diffs)
+
+    if not file_diffs:
         log.info(
-            "extract_diff.complete",
-            files=len(filtered_diffs),
-            functions_changed=len(function_changes),
-            new_files=len(new_files),
-            deleted_files=len(deleted_files),
+            "extract_diff.no_code_files",
+            total_files=total_files,
+            filtered_out=total_files,
         )
-        
         return {
-            "file_diffs": filtered_diffs,
-            "function_changes": function_changes,
-            "new_files": new_files,
-            "deleted_files": deleted_files,
-            "file_contents": file_contents,
-            "skip_review": False,
+            "file_diffs": [],
+            "skip_review": True,
+            "skip_reason": "No code files to review",
         }
+
+    log.info(
+        "extract_diff.complete",
+        total_files=total_files,
+        code_files=code_files,
+        filtered_out=total_files - code_files,
+        files=[f.file_path for f in file_diffs],
+    )
+
+    return {
+        "file_diffs": file_diffs,
+        "pending_files": file_diffs.copy(),
+        "skip_review": False,
+    }

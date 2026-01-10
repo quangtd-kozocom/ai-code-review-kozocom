@@ -19,6 +19,10 @@ class SlackService:
         if self.settings.SLACK_BOT_TOKEN:
             self.client = AsyncWebClient(token=self.settings.SLACK_BOT_TOKEN)
 
+    def is_configured(self) -> bool:
+        """Check if Slack is configured."""
+        return self.client is not None
+
     async def send_review_notification(
         self,
         pr_number: int,
@@ -100,3 +104,87 @@ class SlackService:
                 repo=repo,
             )
             return False
+
+    async def post_review_summary(
+        self,
+        pr_url: str,
+        pr_title: str,
+        author: str,
+        summary: str,
+        breaking_count: int = 0,
+        comment_count: int = 0,
+    ) -> dict:
+        """Post a review summary to Slack.
+
+        Args:
+            pr_url: URL to the pull request.
+            pr_title: Title of the PR.
+            author: PR author username.
+            summary: Review summary text.
+            breaking_count: Number of breaking changes found.
+            comment_count: Total number of comments posted.
+
+        Returns:
+            Result dict with status and optional error.
+        """
+        if not self.client:
+            return {"status": "skipped", "reason": "Slack not configured"}
+
+        emoji = "🔴" if breaking_count > 0 else "✅"
+        status_text = f"{breaking_count} breaking changes" if breaking_count else "No breaking changes"
+
+        blocks: list[dict] = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"{emoji} Code Review Complete",
+                },
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*PR:* {pr_title}"},
+                    {"type": "mrkdwn", "text": f"*Author:* {author}"},
+                ],
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": summary[:SLACK_MESSAGE_CHAR_LIMIT],
+                },
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"📊 {status_text} | 💬 {comment_count} comments",
+                    }
+                ],
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View PR"},
+                        "url": pr_url,
+                        "style": "primary",
+                    }
+                ],
+            },
+        ]
+
+        try:
+            await self.client.chat_postMessage(
+                channel=self.settings.SLACK_CHANNEL,
+                blocks=blocks,
+                text=f"Code Review: {pr_title}",
+            )
+            log.info("Slack review summary posted", pr_url=pr_url)
+            return {"status": "success"}
+        except SlackApiError as e:
+            log.error("Slack review summary failed", error=str(e))
+            return {"status": "error", "error": str(e)}

@@ -6,199 +6,199 @@ Uses Python 3.14 features for cleaner type definitions.
 
 import operator
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, TypedDict
-
-from pydantic import BaseModel, Field
-
-from ..analysis.call_graph import CallGraph
-from ..analysis.context_builder import FunctionContext, ReviewContext
-from ..analysis.diff_extractor import ChangeType, FileDiff
-from ..analysis.external_discovery import ExternalFile
-from ..analysis.impact_analyzer import FunctionImpact, ImpactLevel, ImpactReport
-from ..core.config import ReviewerConfig
+from typing import Annotated, TypedDict
 
 __all__ = [
     "PRContext",
-    "DependencyAnalysis",
-    "CodeRef",
-    "AffectedFile",
+    "FileDiff",
+    "DetectedChange",
+    "SearchPlan",
+    "SearchResult",
+    "AffectedCaller",
+    "BreakingChange",
     "ReviewComment",
     "ReviewState",
-    "FunctionReviewInput",
-    "ExternalFile",
 ]
 
-type Severity = Literal["critical", "warning", "info", "suggestion"]
-type ReviewDepth = Literal["deep", "standard", "quick"]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Data Models
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 @dataclass(frozen=True, slots=True)
 class PRContext:
-    """Context about the PR being reviewed."""
-    
+    """Input: PR information from webhook."""
+
     owner: str
     repo: str
     pr_number: int
     title: str
     author: str
     installation_id: int
-    base_branch: str
-    head_branch: str
-    is_draft: bool = False
-
-
-class DependencyAnalysis(BaseModel):
-    """Information about a dependency that was analyzed for a comment."""
-
-    name: str
-    file: str | None = None
-    behavior_verified: bool = False
-    validation_provided: bool = False
-    summary: str | None = None
-
-    model_config = {"frozen": True}
-
-
-class CodeRef(BaseModel):
-    """Reference to code location with context."""
-    
-    file: str
-    line: int
-    name: str  # Function/class name
-    break_reason: str | None = None  # WHY it will break
-    
-    model_config = {"frozen": True}
-
-
-class AffectedFile(BaseModel):
-    """External file affected by this change."""
-    
-    path: str
-    line: int | None = None
-    break_reason: str
-    
-    model_config = {"frozen": True}
-
-
-class ReviewComment(BaseModel):
-    """A review comment to post to GitHub."""
-
-    file: str
-    line: int
-    severity: Severity
-    category: str
-    message: str
-    suggestion: str | None = None
-    confidence: float = Field(ge=0.0, le=1.0, default=0.8)
-    agent: str = "function_reviewer"
-
-    # Code suggestion with language hint
-    code_suggestion: str | None = None
-
-    # Context used for this comment
-    related_context: list[str] = Field(default_factory=list)
-
-    # Dependencies analyzed for this comment
-    dependencies_analyzed: list[DependencyAnalysis] = Field(default_factory=list)
-
-    # Issue grouping support
-    issue_group: str | None = None
-    related_issues: list[str] = Field(default_factory=list)
-
-    # Impact context (NEW - for breaking changes focus)
-    affected_files: list[AffectedFile] = Field(default_factory=list)
-    caller_refs: list[CodeRef] = Field(default_factory=list)
-    dependency_refs: list[CodeRef] = Field(default_factory=list)
-
-    model_config = {"frozen": True}
+    base_branch: str  # e.g., "main"
+    head_branch: str  # e.g., "feature/payment"
+    is_draft: bool = False  # Whether PR is a draft
 
 
 @dataclass(slots=True)
-class FunctionReviewInput:
-    """Input for reviewing a single function."""
-    
-    function_context: FunctionContext
-    review_depth: ReviewDepth = "standard"
-    focus_areas: list[str] = field(default_factory=list)
+class FileDiff:
+    """A file changed in the PR."""
+
+    file_path: str
+    status: str  # "added", "modified", "deleted", "renamed"
+    base_content: str | None  # Old content
+    head_content: str | None  # New content
+    patch: str  # Git diff
+    language: str | None = None
+
+
+@dataclass(slots=True)
+class DetectedChange:
+    """A change detected by LLM that could break callers."""
+
+    entity_type: str  # "function", "method", "constant", "class", etc.
+    entity_name: str  # "processPayment"
+    class_name: str | None  # "PaymentService"
+    file_path: str
+    language: str
+    change_type: str  # "signature_changed", "deleted", etc.
+    old_definition: str | None
+    new_definition: str | None
+    change_detail: str  # "Added required parameter: $customerId"
+    line: int  # Line number in new file where change occurs
+
+
+@dataclass(slots=True)
+class SearchPlan:
+    """LLM's plan for searching callers."""
+
+    queries: list[str]  # ["processPayment(", "PaymentService::"]
+    include_patterns: list[str]  # ["*.php", "*.blade.php"]
+    exclude_patterns: list[str]  # ["*test*", "*vendor*"]
+    reasoning: str
+
+
+@dataclass(slots=True)
+class SearchResult:
+    """A file found by search."""
+
+    file_path: str
+    line: int
+    match_text: str  # The matched line content
+    context: str  # Surrounding lines for LLM analysis
+
+
+@dataclass(slots=True)
+class AffectedCaller:
+    """A confirmed caller that will break."""
+
+    file_path: str
+    line: int
+    call_text: str  # "processPayment($amount, $method)"
+    break_reason: str  # "Missing required parameter: $customerId"
+
+
+@dataclass(slots=True)
+class BreakingChange:
+    """A confirmed breaking change with full context."""
+
+    # What changed
+    entity_type: str
+    entity_name: str
+    class_name: str | None
+    file_path: str
+    change_type: str
+    old_definition: str | None
+    new_definition: str | None
+    change_detail: str
+    line: int  # Line number in new file
+
+    # Who is affected
+    affected_callers: list[AffectedCaller] = field(default_factory=list)
+
+    # Output
+    severity: str = "warning"  # "critical", "warning"
+    recommendation: str = ""
+
+
+@dataclass(slots=True)
+class ReviewComment:
+    """A comment to post to GitHub."""
+
+    file: str
+    line: int
+    severity: str  # "critical", "warning", "info"
+    message: str
+    affected_files: list[dict] = field(default_factory=list)  # [{path, line, reason}]
+    recommendation: str = ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Workflow State
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class ReviewState(TypedDict, total=False):
-    """State passed through the LangGraph workflow.
-    
-    Uses TypedDict with total=False for optional fields.
-    Fields are added progressively as the workflow executes.
-    """
-    
-    # =========================================================================
-    # Input (from webhook)
-    # =========================================================================
+    """State passed through the LangGraph workflow."""
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # Input
+    # ───────────────────────────────────────────────────────────────────────────
     pr_context: PRContext
-    repo_config: ReviewerConfig
-    
-    # =========================================================================
-    # Phase 1: Diff Analysis (deterministic)
-    # =========================================================================
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # extract_diff + clone_repo
+    # ───────────────────────────────────────────────────────────────────────────
     file_diffs: list[FileDiff]
-    function_changes: dict[str, dict]  # {func_name: {type, old, new}}
-    file_contents: dict[str, str]  # Map file paths to content
-    new_files: list[str]
-    deleted_files: list[str]
-    
-    # =========================================================================
-    # Phase 2: Impact Analysis (AST-based)
-    # =========================================================================
-    call_graph: CallGraph
-    impact_report: ImpactReport
-    
-    # =========================================================================
-    # Phase 2.5: External Discovery (evaluator loop state)
-    # =========================================================================
-    external_files: list[ExternalFile]
-    pending_searches: list[str]  # Targets for next discovery iteration
-    context_sufficient: bool  # LLM evaluator result
-    evaluation_iteration: int  # Current iteration count
-    breaking_changes: list[str]
-    
-    # =========================================================================
-    # Phase 3: Review (LLM-based)
-    # =========================================================================
-    review_context: ReviewContext
-    functions_to_review: list[FunctionReviewInput]
-    
-    # Review outputs (merged via operator.add)
-    comments: Annotated[list[ReviewComment], operator.add]
-    
-    # =========================================================================
-    # Aggregation & Output
-    # =========================================================================
-    final_comments: list[ReviewComment]
-    summary: str
-    review_id: int | None
-    errors: list[str] | None
-    
-    # =========================================================================
-    # Workflow Control
-    # =========================================================================
+    repo_path: str
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # File loop state
+    # ───────────────────────────────────────────────────────────────────────────
+    pending_files: list[FileDiff]  # Files left to process
+    current_file: FileDiff | None  # File being processed
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # analyze_file output (per file)
+    # ───────────────────────────────────────────────────────────────────────────
+    file_changes: list[DetectedChange]  # Changes in current file
+    current_change_index: int  # Which change in file
+    current_change: DetectedChange | None  # Change being searched
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # Search loop state (per change)
+    # ───────────────────────────────────────────────────────────────────────────
+    search_plan: SearchPlan | None
+    search_results: list[SearchResult]
+    verified_callers: list[AffectedCaller]
+    need_more_search: bool
+    additional_queries: list[str]
+    search_iteration: int
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # Per-file results
+    # ───────────────────────────────────────────────────────────────────────────
+    file_breaking_changes: list[BreakingChange]
+    file_comments: list[ReviewComment]
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # Accumulated results (across all files)
+    # ───────────────────────────────────────────────────────────────────────────
+    all_breaking_changes: Annotated[list[BreakingChange], operator.add]
+    all_comments: Annotated[list[ReviewComment], operator.add]
+    published_comments: Annotated[list[ReviewComment], operator.add]
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # Final publish results
+    # ───────────────────────────────────────────────────────────────────────────
+    github_results: list[dict]
+    slack_result: dict | None
+    jira_result: dict | None
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # Control
+    # ───────────────────────────────────────────────────────────────────────────
     skip_review: bool
     skip_reason: str | None
-
-
-def create_initial_state(
-    pr_context: PRContext,
-    repo_config: ReviewerConfig | None = None,
-) -> ReviewState:
-    """Create initial state for workflow.
-    
-    Args:
-        pr_context: PR context from webhook.
-        repo_config: Repository configuration.
-        
-    Returns:
-        Initial ReviewState with required fields.
-    """
-    return ReviewState(
-        pr_context=pr_context,
-        repo_config=repo_config or ReviewerConfig(),
-        comments=[],
-        skip_review=False,
-    )
+    errors: list[str]

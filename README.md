@@ -138,8 +138,12 @@ src/
 
 ### Prerequisites
 
-- **Python 3.13+**
+- **Python 3.14+**
 - **[uv](https://github.com/astral-sh/uv)** (recommended) or pip
+- **[ripgrep](https://github.com/BurntSushi/ripgrep)** - Fast search tool for breaking change detection
+  - macOS: `brew install ripgrep`
+  - Ubuntu: `apt install ripgrep`
+  - Windows: `choco install ripgrep`
 - **Redis** (local) or [Upstash](https://upstash.com/) (cloud)
 - **GitHub App** credentials ([create one here](https://github.com/settings/apps))
 - **OpenAI** or **Anthropic** API key

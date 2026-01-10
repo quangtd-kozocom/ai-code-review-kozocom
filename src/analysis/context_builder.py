@@ -197,8 +197,17 @@ class ContextBuilder:
     into targeted context for LLM review.
     """
 
-    def __init__(self):
+    def __init__(self, github_service=None):
+        """Initialize context builder.
+        
+        Args:
+            github_service: Optional GitHub service for fetching external callees.
+        """
         self.callee_resolver = CalleeResolver()
+        self.github_service = github_service
+        self._owner: str | None = None
+        self._repo: str | None = None
+        self._ref: str | None = None
 
     async def build(
         self,
@@ -235,6 +244,11 @@ class ContextBuilder:
             pr=pr_number,
             functions=len(function_changes),
         )
+        
+        # Store repo info for callee resolution
+        self._owner = owner
+        self._repo = repo
+        self._ref = head_branch  # Use head branch for fetching callees
         
         context = ReviewContext(
             pr_number=pr_number,
@@ -297,10 +311,13 @@ class ContextBuilder:
             new_code = new_func.content
 
         # Find diff for this function's file
+        old_func = change_info.get("old")
+        new_func = change_info.get("new")
+        
         for diff in diffs:
             if diff.file_path == impact.file_path:
                 diff_content = self._extract_function_diff(
-                    diff, impact.name, old_code, new_code
+                    diff, impact.name, old_func, new_func
                 )
                 break
 
@@ -308,9 +325,15 @@ class ContextBuilder:
         callers = call_graph.get_callers(impact.name)
         callee_names = call_graph.get_callees(impact.name)
 
-        # Resolve callee source code
+        # Resolve callee source code (with optional GitHub fallback)
         callees = await self.callee_resolver.resolve_callees(
-            callee_names, call_graph, file_contents
+            callee_names,
+            call_graph,
+            file_contents,
+            github_service=self.github_service,
+            owner=self._owner,
+            repo=self._repo,
+            ref=self._ref,
         )
 
         # Generate review questions
@@ -335,19 +358,87 @@ class ContextBuilder:
         self,
         file_diff: FileDiff,
         function_name: str,
-        old_code: str | None,
-        new_code: str | None,
+        old_func: "FunctionDefinition | None",
+        new_func: "FunctionDefinition | None",
     ) -> str | None:
-        """Extract diff lines relevant to a function."""
-        # For now, return the full patch if we have it
-        # A more sophisticated implementation would extract
-        # only the hunks that affect this function
+        """Extract diff lines relevant to a function.
+        
+        Filters the full file patch to only include hunks that overlap
+        with the function's line range.
+        
+        Args:
+            file_diff: The file diff containing all hunks.
+            function_name: Name of the function.
+            old_func: Old function definition with line numbers.
+            new_func: New function definition with line numbers.
+        """
         if not file_diff.patch:
             return None
         
-        # Simple approach: return the patch
-        # TODO: Filter to only include relevant hunks
-        return file_diff.patch
+        # If we don't have line information, return full patch
+        if not file_diff.hunks:
+            return file_diff.patch
+        
+        # Get function line ranges from FunctionDefinition objects
+        old_start = old_func.start_line if old_func else None
+        old_end = old_func.end_line if old_func else None
+        new_start = new_func.start_line if new_func else None
+        new_end = new_func.end_line if new_func else None
+        
+        # If we can't determine ranges, return full patch
+        if (old_start is None and new_start is None):
+            return file_diff.patch
+        
+        # Filter hunks that overlap with function ranges
+        relevant_hunks = []
+        for hunk in file_diff.hunks:
+            # Check if hunk overlaps with old or new function range
+            old_overlaps = (
+                old_start is not None and
+                self._ranges_overlap(
+                    hunk.old_start, hunk.old_start + hunk.old_lines,
+                    old_start, old_end
+                )
+            )
+            new_overlaps = (
+                new_start is not None and
+                self._ranges_overlap(
+                    hunk.new_start, hunk.new_start + hunk.new_lines,
+                    new_start, new_end
+                )
+            )
+            
+            if old_overlaps or new_overlaps:
+                relevant_hunks.append(hunk)
+        
+        # If no relevant hunks found, return None (function might not have changed)
+        if not relevant_hunks:
+            return None
+        
+        # Reconstruct diff from relevant hunks
+        diff_lines = []
+        for hunk in relevant_hunks:
+            # Add hunk header
+            diff_lines.append(
+                f"@@ -{hunk.old_start},{hunk.old_lines} "
+                f"+{hunk.new_start},{hunk.new_lines} @@"
+            )
+            # Add hunk content
+            diff_lines.extend(hunk.lines)
+        
+        return "\n".join(diff_lines)
+    
+    def _ranges_overlap(
+        self,
+        start1: int,
+        end1: int,
+        start2: int | None,
+        end2: int | None,
+    ) -> bool:
+        """Check if two line ranges overlap."""
+        if start2 is None or end2 is None:
+            return False
+        return not (end1 < start2 or end2 < start1)
     
     def _generate_review_questions(
         self,

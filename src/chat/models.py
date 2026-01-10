@@ -1,17 +1,11 @@
-"""Pydantic models for type-safe GitHub API responses.
-
-Note: FixResult and FileChange are imported from canonical locations
-to avoid duplication. Use these imports for consistency across the codebase.
-"""
+"""Pydantic models for type-safe GitHub API responses."""
 
 from pydantic import BaseModel
 
 # Re-export canonical models for backward compatibility
 from ..agents.models import FixResult
-from ..agents.state import FileChange
 
 __all__ = [
-    "FileChange",
     "FixResult",
     "GitHubReviewComment",
 ]

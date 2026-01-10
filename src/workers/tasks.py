@@ -13,7 +13,7 @@ from typing import Any
 
 import structlog
 
-from ..agents import graph, PRContext
+from ..agents import PRContext, run_review
 from ..app.services.github import GitHubService
 from ..chat.context import CommandContext
 from ..chat.handler import CommandHandler
@@ -57,24 +57,27 @@ async def _run_review(
             is_draft=pr_details.get("draft", False),
         ),
         "file_diffs": [],
-        "comments": [],
-        "final_comments": [],
-        "summary": "",
-        "review_id": None,
+        "all_breaking_changes": [],
+        "all_comments": [],
+        "published_comments": [],
         "errors": [],
     }
 
-    result = await graph.ainvoke(initial_state)
+    result = await run_review(initial_state)
 
     if result.get("errors"):
         log.error("Review completed with errors", errors=result["errors"])
     else:
-        log.info("Review completed", review_id=result.get("review_id"))
+        log.info(
+            "Review completed",
+            breaking_changes=len(result.get("all_breaking_changes", [])),
+            comments=len(result.get("all_comments", [])),
+        )
 
     return {
         "status": "completed",
-        "review_id": result.get("review_id"),
-        "comment_count": len(result.get("final_comments", [])),
+        "breaking_changes": len(result.get("all_breaking_changes", [])),
+        "comment_count": len(result.get("all_comments", [])),
         "errors": result.get("errors", []),
     }
 

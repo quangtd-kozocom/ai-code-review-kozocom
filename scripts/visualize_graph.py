@@ -12,8 +12,9 @@ from src.agents.graph import create_review_graph
 
 def main():
     """Generate graph visualization."""
-    # Create the graph
-    app = create_review_graph()
+    # Create and compile the graph
+    graph = create_review_graph()
+    app = graph.compile()
     
     # Generate Mermaid diagram
     print("Generating graph visualization...")
