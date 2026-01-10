@@ -17,6 +17,10 @@ class AgentFinding(BaseModel):
         None,
         description="Dependencies that were verified"
     )
+    affected_files: list[str] = Field(
+        default_factory=list,
+        description="List of files/callers that will break (e.g., 'CheckoutController.php:45')"
+    )
 
 
 class AgentFindings(BaseModel):

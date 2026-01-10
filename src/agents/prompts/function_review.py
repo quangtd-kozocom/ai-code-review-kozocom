@@ -4,60 +4,65 @@ Provides structured prompts for reviewing individual functions
 with precise context and targeted questions.
 """
 
-SYSTEM_PROMPT = """You are an expert code reviewer focusing on code quality, security, and correctness.
+SYSTEM_PROMPT = """You are an expert code reviewer focusing exclusively on breaking changes and caller impact.
+
+## 🎯 PRIMARY FOCUS: BREAKING CHANGES & IMPACT
+
+Your ONLY job is to identify changes that will break existing code or cause runtime failures:
+
+1. **Signature Changes** - Will existing callers break?
+   - Added required parameters without defaults
+   - Removed parameters that callers depend on
+   - Changed parameter types incompatibly
+   - Changed return type that breaks caller expectations
+
+2. **Caller Impact** - Will code that uses this function fail?
+   - Existing callers shown in context will break
+   - Exception types changed or added (callers may not catch)
+   - Return value contract changed (null when not expected, different type)
+
+3. **Business Logic Errors** - Incorrect behavior
+   - Wrong calculations or algorithms
+   - Missing required validation for business rules
+   - Data integrity issues (e.g., saving invalid state)
+
+4. **Missing Required Parameters** - Parameters that should be required but aren't validated
+   - Function expects non-null but doesn't check
+   - Required business data not validated
+
+## 🚫 DO NOT REPORT
+
+- Test coverage issues
+- Code style or formatting
+- Performance optimizations
+- General "best practices"
+- Refactoring suggestions
+- Documentation quality
 
 ## 🛡️ ANTI-HALLUCINATION PROTOCOL
 
 Before reporting ANY issue:
-1. **CITE YOUR SOURCE**: Quote exact code from provided context proving the issue
-2. **VERIFY DON'T SPECULATE**: If you can't cite proof, DON'T report it
-3. **CHECK DEPENDENCIES**: If callee source is provided, verify behavior before claiming issues
-4. **ADMIT UNCERTAINTY**: If implementation not in context, say so explicitly
-
-## 🔍 DEPENDENCY VERIFICATION RULES
-
-When you see a callee (called function):
-1. **If callee source code is provided**:
-   - Check if it validates inputs → DON'T report missing validation in caller
-   - Check if it handles None → DON'T report None handling in caller
-   - Check if it provides the safety check → DON'T duplicate the comment
-   - Quote the callee code that provides the safety
-2. **If callee source NOT provided**:
-   - Say "Cannot verify X behavior - callee source not in context"
-   - Set confidence to 0.65 (will be filtered out)
-   - Do NOT assume the callee has bugs
+1. **CITE EXACT CODE**: Quote the specific line that proves the issue
+2. **VERIFY CALLERS**: If callers are shown, identify which ones will break and WHY
+3. **CHECK DEPENDENCIES**: If callee source provided, verify its behavior
+4. **BE SPECIFIC**: Don't say "might break" - say "WILL break CheckoutController.php:45 because..."
 
 ## 📊 CONFIDENCE CALIBRATION
 
-Use these confidence scores:
-- **0.95**: Definite bug with proof (IndexError, null deref with no check, logic error)
-- **0.85**: High-likelihood bug with context evidence
-- **0.75**: Potential bug, callee verified
-- **0.65**: Potential bug, callee NOT verified (will be filtered - below 0.7 threshold)
+- **0.95**: Definite breaking change with proof (signature changed + callers shown)
+- **0.85**: High-likelihood breaking change (signature changed, callers likely affected)
+- **0.75**: Potential breaking change with context evidence
 - **< 0.7**: Don't report - will be filtered out
-
-## 🎯 PRIORITIZATION
-
-**Focus on REAL BUGS:**
-- Logic errors
-- Unhandled exceptions
-- Boundary conditions
-- Security vulnerabilities
-- Null/None dereferences with no safety checks
-
-**Skip redundant validation comments:**
-- If validation exists in called functions, don't report it in caller
-- Aggregate related issues instead of repeating the same pattern
 
 ## Output Format
 Respond with a JSON object containing a "findings" array.
 Each finding must have:
 - line: int (the line number in the new code)
-- severity: "critical" | "warning" | "info" | "suggestion"
-- message: str (clear explanation of the issue)
+- severity: "critical" | "warning" (only these two - no info/suggestion)
+- message: str (clear explanation focusing on WHAT will break)
 - suggestion: str | null (how to fix it)
 - confidence: float (0.0 to 1.0, use calibration above)
-- dependencies_checked: list[dict] | null (dependencies that were verified, optional)
+- affected_files: list[str] (files/callers that will break - extract from context)
 """
 
 
@@ -120,8 +125,6 @@ def build_function_review_prompt(
                     lines.append("- ⚠️ **Backward Compatibility**: Check if changes break existing callers")
                 case "caller_impact":
                     lines.append("- 📞 **Caller Impact**: Verify callers will work correctly")
-                case "test_coverage":
-                    lines.append("- 🧪 **Test Coverage**: This function lacks tests")
                 case "breaking_changes":
                     lines.append("- 🔴 **Breaking Changes**: Signature or behavior changes detected")
                 case "api_stability":
@@ -158,15 +161,17 @@ def build_function_review_prompt(
             "",
         ])
     
-    # Callers context
+    # Callers context - CRITICAL for breaking change detection
     if callers:
         lines.extend([
-            f"## Callers ({len(callers)} functions call this)",
+            f"## ⚠️ Callers ({len(callers)} functions call this - WILL THEY BREAK?)",
+            "",
+            "**For each caller below, determine if it will break and WHY:**",
             "",
         ])
         for caller in callers[:5]:
             lines.extend([
-                f"### `{caller['name']}` in {caller['file']}:{caller.get('line', '?')}",
+                f"### `{caller['name']}` in `{caller['file']}:{caller.get('line', '?')}`",
                 "```python",
                 caller.get("context", "# Context not available"),
                 "```",
@@ -211,31 +216,41 @@ def build_function_review_prompt(
 
             lines.append("")
     
-    # External files context (NEW)
+    # External files context - Files outside PR that depend on this code
     if external_files:
         lines.extend([
-            f"## 🔍 External Files Affected ({len(external_files)} files found)",
+            f"## 📁 External Files Affected ({len(external_files)} files outside PR)",
             "",
-            "**These files outside the PR depend on this code:**",
+            "**These files are NOT in the PR but depend on this code:**",
+            "**Determine if each will break and explain WHY:**",
             "",
         ])
         
         for ext_file in external_files[:10]:  # Limit to 10
-            lines.append(f"### {ext_file.get('path', 'Unknown')}")
-            lines.append(f"**Usage Type:** {ext_file.get('usage_type', 'unknown')}")
+            lines.append(f"### `{ext_file.get('path', 'Unknown')}`")
+            
+            if ext_file.get('usage_type'):
+                lines.append(f"**Usage:** {ext_file.get('usage_type')}")
             
             if ext_file.get('references'):
                 lines.append(f"**References:** {', '.join(ext_file['references'])}")
             
-            if ext_file.get('will_break'):
-                lines.append(f"**⚠️ WILL BREAK:** {ext_file.get('break_reason', 'Incompatible change')}")
-            
             if ext_file.get('affected_lines'):
-                lines.append(f"**Affected Lines:** {', '.join(map(str, ext_file['affected_lines'][:5]))}")
+                lines.append(f"**Lines:** {', '.join(map(str, ext_file['affected_lines'][:5]))}")
+            
+            # Show snippet if available
+            if ext_file.get('content'):
+                content_preview = ext_file['content'][:500]
+                lines.extend([
+                    "**Code snippet:**",
+                    "```python",
+                    content_preview,
+                    "```",
+                ])
             
             lines.append("")
     
-    # Breaking changes summary (NEW)
+    # Breaking changes summary
     if breaking_changes:
         lines.extend([
             "## 🚨 Breaking Changes Detected",
@@ -245,10 +260,10 @@ def build_function_review_prompt(
             lines.append(f"- {change}")
         lines.append("")
         lines.extend([
-            "**Review with this context:**",
-            "- Will the changes break any of the external files?",
-            "- Are there missing exception handlers that external callers expect?",
-            "- Is the change backward compatible with external usage?",
+            "**CRITICAL: For each caller/external file, specify:**",
+            "1. Which file/line will break",
+            "2. WHY it will break (be specific)",
+            "3. What needs to change to fix it",
             "",
         ])
     
@@ -266,35 +281,34 @@ def build_function_review_prompt(
     match review_depth:
         case "deep":
             lines.extend([
-                "## Review Instructions (DEEP)",
+                "## Review Instructions (DEEP - Breaking Changes Focus)",
                 "",
-                "Perform a thorough review covering:",
-                "- Logic correctness and edge cases",
-                "- Security implications",
-                "- Error handling completeness",
-                "- Performance considerations",
-                "- Impact on all callers",
-                "- API contract changes",
+                "Analyze for breaking changes:",
+                "- Will signature changes break callers? (List specific files/lines)",
+                "- Will exception changes break error handlers?",
+                "- Will return type changes break caller expectations?",
+                "- Are there business logic errors?",
+                "- For EACH affected file, explain WHY it breaks",
                 "",
             ])
         case "standard":
             lines.extend([
-                "## Review Instructions (STANDARD)",
+                "## Review Instructions (STANDARD - Breaking Changes Focus)",
                 "",
-                "Focus on:",
-                "- Logic correctness",
-                "- Obvious bugs or issues",
-                "- Error handling",
-                "- Direct caller impact",
+                "Check for:",
+                "- Breaking signature changes affecting callers",
+                "- Business logic errors",
+                "- Missing required parameter validation",
+                "- List specific files that will break and WHY",
                 "",
             ])
         case "quick":
             lines.extend([
-                "## Review Instructions (QUICK)",
+                "## Review Instructions (QUICK - Breaking Changes Focus)",
                 "",
                 "Quick check for:",
-                "- Obvious bugs",
-                "- Critical security issues",
+                "- Critical breaking changes",
+                "- Which callers will fail",
                 "",
             ])
     

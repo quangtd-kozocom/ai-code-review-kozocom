@@ -20,6 +20,8 @@ from ..core.config import ReviewerConfig
 __all__ = [
     "PRContext",
     "DependencyAnalysis",
+    "CodeRef",
+    "AffectedFile",
     "ReviewComment",
     "ReviewState",
     "FunctionReviewInput",
@@ -57,6 +59,27 @@ class DependencyAnalysis(BaseModel):
     model_config = {"frozen": True}
 
 
+class CodeRef(BaseModel):
+    """Reference to code location with context."""
+    
+    file: str
+    line: int
+    name: str  # Function/class name
+    break_reason: str | None = None  # WHY it will break
+    
+    model_config = {"frozen": True}
+
+
+class AffectedFile(BaseModel):
+    """External file affected by this change."""
+    
+    path: str
+    line: int | None = None
+    break_reason: str
+    
+    model_config = {"frozen": True}
+
+
 class ReviewComment(BaseModel):
     """A review comment to post to GitHub."""
 
@@ -81,6 +104,11 @@ class ReviewComment(BaseModel):
     # Issue grouping support
     issue_group: str | None = None
     related_issues: list[str] = Field(default_factory=list)
+
+    # Impact context (NEW - for breaking changes focus)
+    affected_files: list[AffectedFile] = Field(default_factory=list)
+    caller_refs: list[CodeRef] = Field(default_factory=list)
+    dependency_refs: list[CodeRef] = Field(default_factory=list)
 
     model_config = {"frozen": True}
 

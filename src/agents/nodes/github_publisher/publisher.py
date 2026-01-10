@@ -22,7 +22,7 @@ class GitHubReviewPublisher:
     ):
         self._github = github
         self._ctx = ctx
-        self._formatter = CommentFormatter(language)
+        self._formatter = CommentFormatter(language, ctx)
 
     async def publish(
         self,

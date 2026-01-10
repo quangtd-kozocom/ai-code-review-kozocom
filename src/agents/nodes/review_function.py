@@ -10,7 +10,7 @@ from ...analysis.context_builder import FunctionContext
 from ...core.llm import get_llm
 from ..models import AgentFindings
 from ..prompts.function_review import SYSTEM_PROMPT, build_function_review_prompt
-from ..state import FunctionReviewInput, ReviewComment, ReviewState
+from ..state import AffectedFile, CodeRef, FunctionReviewInput, ReviewComment, ReviewState
 
 log = structlog.get_logger()
 
@@ -74,6 +74,7 @@ async def review_single_function(
                 "will_break": f.will_break,
                 "break_reason": f.break_reason,
                 "affected_lines": f.affected_lines,
+                "content": f.content[:500] if f.content else None,  # Include snippet
             }
             for f in external_files
             if ctx.name in f.references  # Only include files that reference this function
@@ -129,6 +130,57 @@ async def review_single_function(
         # Convert AgentFindings to ReviewComments
         comments = []
         for finding in result.findings:
+            # Parse affected_files from LLM output into structured refs
+            caller_refs = []
+            affected_files_list = []
+            
+            for affected in finding.affected_files:
+                # Parse format like "CheckoutController.php:45" or just "CheckoutController.php"
+                if ":" in affected:
+                    file_part, line_part = affected.rsplit(":", 1)
+                    try:
+                        line_num = int(line_part)
+                        # If it's from callers_data, it's a caller
+                        if any(c["file"] == file_part for c in callers_data):
+                            caller_refs.append(CodeRef(
+                                file=file_part,
+                                line=line_num,
+                                name=next((c["name"] for c in callers_data if c["file"] == file_part), "unknown"),
+                                break_reason=f"Incompatible with changes"
+                            ))
+                        # Otherwise it's an external file
+                        else:
+                            affected_files_list.append(AffectedFile(
+                                path=file_part,
+                                line=line_num,
+                                break_reason=f"Uses changed code"
+                            ))
+                    except ValueError:
+                        # Not a valid line number, treat as file only
+                        affected_files_list.append(AffectedFile(
+                            path=affected,
+                            line=None,
+                            break_reason=f"Uses changed code"
+                        ))
+                else:
+                    # No line number specified
+                    affected_files_list.append(AffectedFile(
+                        path=affected,
+                        line=None,
+                        break_reason=f"Uses changed code"
+                    ))
+            
+            # Build dependency refs from callees
+            dependency_refs = [
+                CodeRef(
+                    file=c.file_path or "unknown",
+                    line=0,
+                    name=c.name,
+                    break_reason=None
+                )
+                for c in ctx.callees[:5]  # Limit to 5
+            ]
+            
             comments.append(ReviewComment(
                 file=ctx.file_path,
                 line=finding.line,
@@ -138,6 +190,9 @@ async def review_single_function(
                 suggestion=finding.suggestion,
                 confidence=finding.confidence,
                 agent="function_reviewer",
+                caller_refs=caller_refs,
+                dependency_refs=dependency_refs,
+                affected_files=affected_files_list,
             ))
         
         log.debug(

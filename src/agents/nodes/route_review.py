@@ -60,15 +60,10 @@ def _determine_focus_areas(impact: FunctionImpact) -> list[str]:
     if impact.caller_count > 0:
         areas.append("caller_impact")
     
-    if not impact.has_tests:
-        areas.append("test_coverage")
-    
     for warning in impact.warnings:
         match warning.warning_type.value:
             case "breaking_signature":
                 areas.append("breaking_changes")
-            case "missing_tests":
-                areas.append("test_coverage")
             case "many_callers":
                 areas.append("api_stability")
     
