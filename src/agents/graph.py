@@ -1,56 +1,151 @@
+"""LangGraph workflow for PR review.
+
+Implements the 3-phase review pipeline:
+1. Diff Analysis (deterministic)
+2. Impact Analysis (AST-based)
+3. Review (LLM-based)
+"""
+
+import structlog
 from langgraph.graph import END, StateGraph
 
 from .nodes import (
-    acknowledger,
-    aggregator,
-    context_extractor,
-    github_publisher,
-    logic_agent,
-    security_agent,
-    slack_reporter,
-    smart_router,
-    style_agent,
+    aggregate,
+    analyze_impact,
+    build_call_graph,
+    extract_diff,
+    review_function,
+    route_review,
 )
-from .state import GraphState
+from .nodes.github_publisher import run as publish_github
+from .state import ReviewState
+
+log = structlog.get_logger()
 
 
+def should_skip_review(state: ReviewState) -> str:
+    """Check if review should be skipped."""
+    if state.get("skip_review"):
+        log.info(
+            "graph.skipping_review",
+            reason=state.get("skip_reason", "unknown"),
+        )
+        return "skip"
+    return "continue"
+
+
+def should_skip_publish(state: ReviewState) -> str:
+    """Check if publishing should be skipped."""
+    comments = state.get("final_comments", [])
+    if not comments:
+        return "skip"
+    return "continue"
+
+
+def create_review_graph() -> StateGraph:
+    """Create the v2 PR review workflow graph.
+    
+    Graph structure:
+    ```
+    START
+      │
+      ▼
+    extract_diff ──────────────────────────────┐
+      │                                         │
+      ▼                                         │ (skip)
+    build_call_graph                           │
+      │                                         │
+      ▼                                         │
+    analyze_impact                             │
+      │                                         │
+      ▼                                         │
+    route_review                               │
+      │                                         │
+      ▼                                         │
+    review_functions                           │
+      │                                         │
+      ▼                                         │
+    aggregate ◄────────────────────────────────┘
+      │
+      ├──────────────┐
+      ▼              ▼
+    publish       notify
+      │              │
+      └──────┬───────┘
+             ▼
+            END
+    ```
+    """
+    graph = StateGraph(ReviewState)
+    
+    # =========================================================================
+    # Phase 1: Diff Analysis (deterministic)
+    # =========================================================================
+    graph.add_node("extract_diff", extract_diff.run)
+    
+    # =========================================================================
+    # Phase 2: Impact Analysis (AST-based)
+    # =========================================================================
+    graph.add_node("build_call_graph", build_call_graph.run)
+    graph.add_node("analyze_impact", analyze_impact.run)
+    
+    # =========================================================================
+    # Phase 3: Review (LLM-based)
+    # =========================================================================
+    graph.add_node("route_review", route_review.run)
+    graph.add_node("review_functions", review_function.run)
+    
+    # =========================================================================
+    # Aggregation & Output
+    # =========================================================================
+    graph.add_node("aggregate", aggregate.run)
+    graph.add_node("publish", publish_github)
+    
+    # =========================================================================
+    # Edges: Linear flow with skip conditions
+    # =========================================================================
+    
+    # Entry point
+    graph.set_entry_point("extract_diff")
+    
+    # After extract_diff, check if we should skip
+    graph.add_conditional_edges(
+        "extract_diff",
+        should_skip_review,
+        {
+            "skip": "aggregate",
+            "continue": "build_call_graph",
+        },
+    )
+    
+    # Phase 2 flow
+    graph.add_edge("build_call_graph", "analyze_impact")
+    graph.add_edge("analyze_impact", "route_review")
+    
+    # Phase 3 flow
+    graph.add_edge("route_review", "review_functions")
+    graph.add_edge("review_functions", "aggregate")
+    
+    # Output flow
+    graph.add_conditional_edges(
+        "aggregate",
+        should_skip_publish,
+        {
+            "skip": END,
+            "continue": "publish",
+        },
+    )
+    
+    graph.add_edge("publish", END)
+    
+    return graph.compile()
+
+
+# Singleton compiled graph
+graph = create_review_graph()
+
+
+# Backward compatibility alias
 def create_graph() -> StateGraph:
-    """Create the review workflow graph with smart routing."""
-    g = StateGraph(GraphState)
-
-    # Nodes
-    g.add_node("acknowledge", acknowledger.run)
-    g.add_node("extract", context_extractor.run)
-    g.add_node("router", smart_router.run)
-    g.add_node("security", security_agent.run)
-    g.add_node("style", style_agent.run)
-    g.add_node("logic", logic_agent.run)
-    g.add_node("aggregate", aggregator.run)
-    g.add_node("publish", github_publisher.run)
-    g.add_node("notify", slack_reporter.run)
-
-    # Flow: acknowledge -> extract -> router -> parallel agents -> aggregate -> publish -> notify
-    g.set_entry_point("acknowledge")
-    g.add_edge("acknowledge", "extract")
-    g.add_edge("extract", "router")
-
-    # Router fans out to all agents (agents self-filter based on routing_decisions)
-    g.add_edge("router", "security")
-    g.add_edge("router", "style")
-    g.add_edge("router", "logic")
-
-    # Fan-in to aggregator
-    g.add_edge("security", "aggregate")
-    g.add_edge("style", "aggregate")
-    g.add_edge("logic", "aggregate")
-
-    # Publish and notify
-    g.add_edge("aggregate", "publish")
-    g.add_edge("publish", "notify")
-    g.add_edge("notify", END)
-
-    return g.compile()
-
-
-# Singleton
-graph = create_graph()
+    """Create the review workflow graph (backward compatible)."""
+    return create_review_graph()

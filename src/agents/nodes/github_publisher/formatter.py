@@ -42,14 +42,14 @@ class CommentFormatter:
         ]
 
         # Show RAG context sources if available
-        if comment.related_files:
+        if comment.related_context:
             lines.extend([
                 "",
                 "<details>",
                 "<summary>📚 <b>Context Used</b></summary>",
                 "",
             ])
-            for ref in comment.related_files[:3]:
+            for ref in comment.related_context[:3]:
                 lines.append(f"- `{ref}`")
             lines.extend(["", "</details>"])
 

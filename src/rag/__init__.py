@@ -1,49 +1,28 @@
 """RAG (Retrieval-Augmented Generation) module for context-aware code review.
 
-This module provides the RAG pipeline for enriching code reviews with
-related context from the codebase.
+This module has been refactored from a vector database approach to
+AST-based direct analysis. The core functionality has moved to:
+- src/analysis/ - New analysis module with AST-based approach
 
-Components:
-- Chunker: Smart code chunking using AST
-- Embedder: Text embedding generation (OpenAI/Gemini)
-- Indexer: Codebase indexing orchestrator
-- Retriever: Smart context retrieval with explicit relationships
-- VectorStore: Pinecone vector store wrapper
+Remaining components:
+- Chunker: Smart code chunking using AST (still useful for context)
+- Config: Configuration settings
 
-Helper classes (call_resolution):
-- CallParser: Parse function calls from code
-- CalleeResolver: Resolve calls to indexed definitions
-- CallerFinder: Find functions that call target
-- TestFinder: Find tests for source functions
+Removed (moved to analysis module):
+- Embedder: No longer needed (removed Pinecone dependency)
+- VectorStore: No longer needed (removed Pinecone dependency)
+- Indexer: No longer needed (on-demand analysis instead)
+- Retriever: Replaced by analysis/call_graph.py
 """
 
-from .call_resolution import CalleeResolver, CallerFinder, CallParser, TestFinder
 from .chunker import Chunker, get_chunker
 from .config import RAGSettings, get_rag_settings
-from .embedder import Embedder, get_embedder
-from .indexer import Indexer, create_indexer
-from .retriever import Retriever, get_retriever
-from .vector_store import VectorMatch, VectorStore, get_vector_store
 
 __all__ = [
-    # Core components
+    # Remaining components
     "Chunker",
-    "Embedder",
-    "Indexer",
     "RAGSettings",
-    "Retriever",
-    "VectorStore",
-    "VectorMatch",
-    # Call resolution helpers
-    "CallParser",
-    "CalleeResolver",
-    "CallerFinder",
-    "TestFinder",
     # Factory functions
-    "create_indexer",
     "get_chunker",
-    "get_embedder",
     "get_rag_settings",
-    "get_retriever",
-    "get_vector_store",
 ]

@@ -1,64 +1,12 @@
-"""AST data models."""
+"""Data models for code analysis.
 
-import json
+Consolidated models for AST analysis, replacing the old src.ast.models module.
+"""
+
 from dataclasses import dataclass, field
 from typing import Literal
 
 type ChunkType = Literal["function", "class", "method", "import", "module", "module_header"]
-type RelationshipType = Literal["caller", "callee", "similar", "test", "sibling", "transitive"]
-
-
-@dataclass(slots=True)
-class CodeChunk:
-    """Represents a parseable unit of code."""
-
-    chunk_type: ChunkType
-    name: str
-    content: str
-    file_path: str
-    start_line: int
-    end_line: int
-    language: str
-
-    signature: str | None = field(default=None, kw_only=True)
-    docstring: str | None = field(default=None, kw_only=True)
-    dependencies: list[str] = field(default_factory=list, kw_only=True)
-    parameters: list["ParameterInfo"] = field(default_factory=list, kw_only=True)
-    imports: list[str] = field(default_factory=list, kw_only=True)
-    calls: list[str] = field(default_factory=list, kw_only=True)
-
-    @property
-    def id(self) -> str:
-        """Generate unique ID for this chunk."""
-        return f"{self.file_path}:{self.name}:{self.start_line}"
-
-    @property
-    def parameters_json(self) -> str | None:
-        """Serialize parameters to JSON string."""
-        if not self.parameters:
-            return None
-        return json.dumps(
-            [
-                {
-                    "name": p.name,
-                    "type_hint": p.type_hint,
-                    "default_value": p.default_value,
-                    "is_variadic": p.is_variadic,
-                    "is_keyword": p.is_keyword,
-                }
-                for p in self.parameters
-            ]
-        )
-
-    def to_context_text(self) -> str:
-        """Convert chunk to text for LLM context."""
-        parts = [f"{self.chunk_type}: {self.name}"]
-        if self.signature:
-            parts.append(f"Signature: {self.signature}")
-        if self.docstring:
-            parts.append(f"Docstring: {self.docstring}")
-        parts.append(f"Code:\n{self.content}")
-        return "\n".join(parts)
 
 
 @dataclass(slots=True)
@@ -142,15 +90,56 @@ class ASTInfo:
     changed_entities: list[str] = field(default_factory=list)
 
 
-@dataclass(slots=True)
-class RelatedCode:
-    """Related code retrieved from RAG."""
+# Language detection mapping
+LANGUAGE_EXTENSIONS: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".php": "php",
+    ".rb": "ruby",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".swift": "swift",
+    ".c": "c",
+    ".cpp": "cpp",
+    ".h": "c",
+    ".hpp": "cpp",
+    ".cs": "c_sharp",
+}
 
-    file_path: str
-    name: str
-    content: str
-    chunk_type: str
-    relevance_score: float
-    relationship: RelationshipType
-    start_line: int = 0
-    end_line: int = 0
+
+def detect_language(file_path: str) -> str | None:
+    """Detect language from file extension."""
+    from pathlib import Path
+    ext = Path(file_path).suffix.lower()
+    return LANGUAGE_EXTENSIONS.get(ext)
+
+
+def get_grammar_name(file_path: str) -> str | None:
+    """Get tree-sitter grammar name for a file."""
+    lang = detect_language(file_path)
+    if not lang:
+        return None
+    
+    # Map common language names to tree-sitter grammar names
+    grammar_map = {
+        "javascript": "javascript",
+        "typescript": "typescript",
+        "tsx": "tsx",
+        "python": "python",
+        "php": "php",
+        "ruby": "ruby",
+        "go": "go",
+        "rust": "rust",
+        "java": "java",
+        "kotlin": "kotlin",
+        "swift": "swift",
+        "c": "c",
+        "cpp": "cpp",
+        "c_sharp": "c_sharp",
+    }
+    return grammar_map.get(lang, lang)

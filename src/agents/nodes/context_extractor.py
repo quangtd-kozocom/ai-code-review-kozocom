@@ -1,6 +1,6 @@
 """Context extractor node - loads repository config and PR file changes.
 
-Refactored to use RAGEnricher service for file enrichment.
+Refactored to use FileEnricher service for file enrichment (v2).
 """
 
 import structlog
@@ -8,7 +8,7 @@ import structlog
 from ...app.services.github import GitHubService
 from ...core.config import ReviewerConfig
 from ...core.constants import get_language_or_none
-from ..services.rag_enricher import RAGEnricher
+from ..services.file_enricher import FileEnricher
 from ..state import FileChange, GraphState, PRContext
 
 log = structlog.get_logger()
@@ -88,12 +88,12 @@ async def run(state: GraphState) -> dict:
         raw_files = await github.get_pr_files(ctx.owner, ctx.repo, ctx.pr_number)
         files, ignored_count = _filter_files(raw_files, config)
 
-        # Enrich files with RAG context using dedicated service
-        enricher = RAGEnricher(github)
+        # Enrich files with AST context using dedicated service
+        enricher = FileEnricher(github)
         try:
             files = await enricher.enrich_files(files, ctx)
         except Exception as e:
-            log.warning("context_extractor.rag_enrichment_failed", error=str(e))
+            log.warning("context_extractor.enrichment_failed", error=str(e))
             # Continue with non-enriched files
 
         log.info(

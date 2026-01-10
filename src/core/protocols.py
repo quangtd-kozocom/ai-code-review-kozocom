@@ -3,152 +3,10 @@
 This module defines protocols (structural subtyping) for core interfaces,
 enabling easier testing and swappable implementations.
 
-Python 3.13+ compatible using modern type syntax.
+Python 3.14+ compatible using modern type syntax.
 """
 
 from typing import Protocol, runtime_checkable
-
-from src.ast.models import CodeChunk, RelatedCode
-
-# =============================================================================
-# Vector Store Protocol
-# =============================================================================
-
-
-@runtime_checkable
-class VectorStoreProtocol(Protocol):
-    """Protocol for vector store operations."""
-
-    def upsert(self, vectors: list[dict], namespace: str) -> None:
-        """Upsert vectors to index."""
-        ...
-
-    def query(
-        self,
-        vector: list[float],
-        namespace: str,
-        top_k: int = 5,
-        filter: dict | None = None,
-    ) -> list:
-        """Query similar vectors."""
-        ...
-
-    def fetch_by_metadata(
-        self,
-        namespace: str,
-        filter: dict,
-        limit: int = 10,
-    ) -> list:
-        """Fetch vectors by metadata filter (no vector required)."""
-        ...
-
-    def delete_by_file(self, namespace: str, file_path: str) -> None:
-        """Delete all vectors for a specific file."""
-        ...
-
-    def delete_namespace(self, namespace: str) -> None:
-        """Delete entire namespace."""
-        ...
-
-
-# =============================================================================
-# Parser Protocol
-# =============================================================================
-
-
-@runtime_checkable
-class CodeParserProtocol(Protocol):
-    """Protocol for code parsing operations."""
-
-    def parse_file(self, file_path: str, content: str) -> list[CodeChunk]:
-        """Parse a file and return code chunks."""
-        ...
-
-    def detect_language(self, file_path: str) -> str | None:
-        """Detect language from file extension."""
-        ...
-
-
-# =============================================================================
-# Embedder Protocol
-# =============================================================================
-
-
-@runtime_checkable
-class EmbedderProtocol(Protocol):
-    """Protocol for embedding generation."""
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a list of texts."""
-        ...
-
-    def embed_single(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
-        ...
-
-
-# =============================================================================
-# Language Plugin Protocol
-# =============================================================================
-
-
-@runtime_checkable
-class LanguagePluginProtocol(Protocol):
-    """Protocol for language-specific parsing."""
-
-    @property
-    def name(self) -> str:
-        """Language name."""
-        ...
-
-    @property
-    def extensions(self) -> tuple[str, ...]:
-        """File extensions."""
-        ...
-
-    def parse_imports(self, content: str) -> list[str]:
-        """Extract imported modules."""
-        ...
-
-    def parse_calls(self, content: str) -> list[str]:
-        """Extract function calls."""
-        ...
-
-    def get_test_patterns(self, file_path: str) -> list[str]:
-        """Generate test file patterns."""
-        ...
-
-
-# =============================================================================
-# Retriever Protocol
-# =============================================================================
-
-
-@runtime_checkable
-class RetrieverProtocol(Protocol):
-    """Protocol for RAG retrieval operations."""
-
-    def retrieve(
-        self,
-        owner: str,
-        repo: str,
-        file_path: str,
-        function_name: str,
-    ) -> list[RelatedCode]:
-        """Retrieve related code for a function."""
-        ...
-
-    def retrieve_for_function(
-        self,
-        owner: str,
-        repo: str,
-        function_name: str,
-        signature: str | None = None,
-        current_file: str | None = None,
-        function_content: str | None = None,
-    ) -> list[RelatedCode]:
-        """Retrieve context for a specific function."""
-        ...
 
 
 # =============================================================================
@@ -186,4 +44,71 @@ class GitHubClientProtocol(Protocol):
 
     async def close(self) -> None:
         """Close the client and release resources."""
+        ...
+
+
+# =============================================================================
+# Analysis Protocol
+# =============================================================================
+
+
+@runtime_checkable
+class AnalyzerProtocol(Protocol):
+    """Protocol for code analysis operations."""
+
+    def extract_functions(self, file_path: str, content: str) -> list:
+        """Extract function definitions from a file."""
+        ...
+
+    def find_call_sites(self, file_path: str, content: str, target_function: str) -> list:
+        """Find all call sites for a function."""
+        ...
+
+    def compare_functions(self, old_content: str, new_content: str, file_path: str) -> dict:
+        """Compare function definitions between versions."""
+        ...
+
+
+# =============================================================================
+# Notification Protocol
+# =============================================================================
+
+
+@runtime_checkable
+class NotifierProtocol(Protocol):
+    """Protocol for notification services."""
+
+    async def send_notification(
+        self,
+        channel: str,
+        message: str,
+        metadata: dict | None = None,
+    ) -> bool:
+        """Send a notification."""
+        ...
+
+
+# =============================================================================
+# Cache Protocol
+# =============================================================================
+
+
+@runtime_checkable
+class CacheProtocol(Protocol):
+    """Protocol for cache operations."""
+
+    async def get(self, key: str) -> str | None:
+        """Get value from cache."""
+        ...
+
+    async def set(self, key: str, value: str, ttl: int | None = None) -> bool:
+        """Set value in cache."""
+        ...
+
+    async def delete(self, key: str) -> bool:
+        """Delete key from cache."""
+        ...
+
+    async def exists(self, key: str) -> bool:
+        """Check if key exists."""
         ...

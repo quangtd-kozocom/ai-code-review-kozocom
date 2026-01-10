@@ -4,8 +4,7 @@ import structlog
 
 from ....app.services.github import GitHubService
 from ....core.i18n import Language
-from ...state import FileChange, PRContext, ReviewComment
-from .diff_analyzer import DiffAnalyzer
+from ...state import PRContext, ReviewComment
 from .formatter import CommentFormatter
 from .models import FilterResult, PublishResult
 
@@ -29,10 +28,9 @@ class GitHubReviewPublisher:
         self,
         summary: str,
         comments: list[ReviewComment],
-        files: list[FileChange],
     ) -> PublishResult:
         """
-        Publish review to GitHub with diff-aware validation.
+        Publish review to GitHub.
 
         Returns PublishResult with review_id and any errors encountered.
         """
@@ -46,18 +44,8 @@ class GitHubReviewPublisher:
             log.info("github_publisher.no_comments", pr=self._ctx.pr_number)
             return PublishResult(mode="comment")
 
-        # Filter comments to valid diff lines
-        filter_result = DiffAnalyzer.filter_comments(comments, files)
-        self._log_filter_result(filter_result)
-
-        # Build final summary with skipped note
-        final_summary = self._build_final_summary(summary, filter_result)
-
-        # Publish based on filter result
-        if not filter_result.has_valid:
-            return await self._publish_as_comment(final_summary)
-
-        return await self._publish_as_review(final_summary, filter_result.valid)
+        # In v2, all comments should be valid since they come from function review
+        return await self._publish_as_review(summary, comments)
 
     def _log_filter_result(self, result: FilterResult) -> None:
         if result.has_skipped:

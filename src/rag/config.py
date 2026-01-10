@@ -1,4 +1,8 @@
-"""RAG configuration."""
+"""RAG configuration.
+
+Simplified configuration after removing Pinecone/embedding dependencies.
+Now focused on AST-based analysis settings.
+"""
 
 from functools import lru_cache
 
@@ -8,40 +12,20 @@ from ..core.constants import IGNORE_PATTERNS, LANGUAGE_MAP
 
 
 class RAGSettings(BaseSettings):
-    """RAG-related settings."""
-
-    # Pinecone
-    pinecone_api_key: str = ""
-    pinecone_index_name: str = "code-reviewer"
-
-    # Embedding Provider: "openai" or "gemini"
-    embedding_provider: str = "gemini"  # Default to Gemini (free tier available)
-
-    # OpenAI Embedding (uses OPENAI_API_KEY from main config)
-    openai_embedding_model: str = "text-embedding-3-small"
-    openai_embedding_dimensions: int = 1024
-
-    # Google Gemini Embedding (free tier: 1500 req/min)
-    google_api_key: str = ""
-    gemini_embedding_model: str = "text-embedding-004"
-    gemini_embedding_dimensions: int = 768  # Supports 768, 1536, 3072
-
-    # Active embedding dimensions (set based on provider)
-    @property
-    def embedding_dimensions(self) -> int:
-        """Get embedding dimensions based on active provider."""
-        if self.embedding_provider == "gemini":
-            return self.gemini_embedding_dimensions
-        return self.openai_embedding_dimensions
+    """RAG-related settings (simplified for AST-based approach)."""
 
     # Chunking
     max_chunk_tokens: int = 500  # Max tokens per chunk
 
-    # Retrieval
-    top_k: int = 5  # Number of similar chunks to retrieve
+    # Analysis limits
+    max_changed_functions: int = 5  # Max functions per file to analyze
+    max_callee_results: int = 5  # Max callees to retrieve per function
+    max_caller_depth: int = 2  # Max depth for caller traversal
+    max_sibling_results: int = 2  # Max sibling functions
 
-    # Indexing
-    batch_size: int = 100  # Vectors per upsert batch
+    # Feature flags
+    enable_sibling_detection: bool = True  # Find functions calling same dependencies
+    enable_transitive_callees: bool = True  # Follow callee chain one level deeper
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 

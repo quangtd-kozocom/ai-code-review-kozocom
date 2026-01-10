@@ -1,16 +1,19 @@
-"""Aggregator node - combines, deduplicates, and limits review comments."""
+"""Aggregator node - combines and deduplicates review comments.
+
+Final processing step before publishing to GitHub.
+"""
 
 from collections import Counter, defaultdict
-from typing import Literal
 
 import structlog
 
 from ...core.config import ReviewerConfig
-from ..state import GraphState, ReviewComment
+from ...core.i18n import Language
+from ..state import ReviewComment, ReviewState
 
 log = structlog.get_logger()
 
-type Severity = Literal["critical", "warning", "info", "suggestion"]
+type Severity = str
 
 _SEVERITY_PRIORITY: dict[str, int] = {
     "critical": 0,
@@ -19,7 +22,7 @@ _SEVERITY_PRIORITY: dict[str, int] = {
     "suggestion": 3,
 }
 
-_SUMMARY_TEMPLATES: dict[str, str] = {
+_SUMMARY_TEMPLATES: dict[Language, str] = {
     "vi": (
         "## 🤖 AI Code Review\n\n"
         "| Mức độ | Số lượng |\n"
@@ -53,22 +56,17 @@ _SUMMARY_TEMPLATES: dict[str, str] = {
 }
 
 
-# =============================================================================
-# Comment Processing
-# =============================================================================
-
-
 def _deduplicate(comments: list[ReviewComment]) -> list[ReviewComment]:
-    """Remove duplicates by (file, line, category) key."""
+    """Remove duplicate comments by (file, line, category) key."""
     seen: set[tuple[str, int, str]] = set()
     unique: list[ReviewComment] = []
-
+    
     for c in comments:
         key = (c.file, c.line, c.category)
         if key not in seen:
             seen.add(key)
             unique.append(c)
-
+    
     return unique
 
 
@@ -80,27 +78,26 @@ def _sort_by_priority(comments: list[ReviewComment]) -> list[ReviewComment]:
     )
 
 
-def _limit_per_file(comments: list[ReviewComment], limit: int) -> list[ReviewComment]:
-    """Keep only top N comments per file (assumes already sorted by priority)."""
+def _limit_per_file(
+    comments: list[ReviewComment],
+    limit: int,
+) -> list[ReviewComment]:
+    """Keep only top N comments per file."""
     by_file: defaultdict[str, list[ReviewComment]] = defaultdict(list)
-
+    
     for c in comments:
         if len(by_file[c.file]) < limit:
             by_file[c.file].append(c)
-
+    
     return [c for file_comments in by_file.values() for c in file_comments]
 
 
-# =============================================================================
-# Summary Generation
-# =============================================================================
-
-
-def _generate_summary(comments: list[ReviewComment], language: str) -> str:
-    """Generate a markdown summary table in the specified language."""
+def _generate_summary(comments: list[ReviewComment], language: Language) -> str:
+    """Generate markdown summary in specified language."""
     counts = Counter(c.severity for c in comments)
+    
     template = _SUMMARY_TEMPLATES.get(language, _SUMMARY_TEMPLATES["en"])
-
+    
     return template.format(
         critical=counts.get("critical", 0),
         warning=counts.get("warning", 0),
@@ -110,33 +107,59 @@ def _generate_summary(comments: list[ReviewComment], language: str) -> str:
     )
 
 
-# =============================================================================
-# Main Node
-# =============================================================================
-
-
-async def run(state: GraphState) -> dict:
-    """Aggregate comments: deduplicate, sort, limit, and generate summary."""
+async def run(state: ReviewState) -> dict:
+    """Aggregate and finalize review comments.
+    
+    Final processing:
+    - Deduplicate comments
+    - Sort by priority
+    - Apply limits
+    - Generate summary
+    
+    Args:
+        state: Current workflow state with comments.
+        
+    Returns:
+        State update with final_comments and summary.
+    """
+    comments = state.get("comments", [])
     config: ReviewerConfig = state.get("repo_config", ReviewerConfig())
-    comments = state["comments"]
-
-    log.info("aggregator.started", total=len(comments))
-
-    # Process pipeline
-    unique = _deduplicate(comments)
-    sorted_comments = _sort_by_priority(unique)
-    final = _limit_per_file(sorted_comments, config.get_max_comments())
-
-    # Generate summary
-    summary = _generate_summary(final, config.language)
-
-    # Log stats
-    counts = Counter(c.severity for c in final)
+    
     log.info(
-        "aggregator.completed",
-        total=len(final),
-        critical=counts.get("critical", 0),
-        deduplicated=len(comments) - len(unique),
+        "aggregator.started",
+        raw_count=len(comments),
     )
-
-    return {"final_comments": final, "summary": summary}
+    
+    if not comments:
+        return {
+            "final_comments": [],
+            "summary": "## 🤖 AI Code Review\n\n✅ No issues found!",
+        }
+    
+    # Process comments
+    comments = _deduplicate(comments)
+    comments = _sort_by_priority(comments)
+    
+    # Apply limit from config
+    max_per_file = getattr(config, "max_comments_per_file", 10)
+    comments = _limit_per_file(comments, max_per_file)
+    
+    # Get language from config
+    language: Language = getattr(config, "language", "en")
+    if language not in ("en", "vi", "ja"):
+        language = "en"
+    
+    # Generate summary
+    summary = _generate_summary(comments, language)
+    
+    log.info(
+        "aggregator.complete",
+        final_count=len(comments),
+        critical=sum(1 for c in comments if c.severity == "critical"),
+        warning=sum(1 for c in comments if c.severity == "warning"),
+    )
+    
+    return {
+        "final_comments": comments,
+        "summary": summary,
+    }

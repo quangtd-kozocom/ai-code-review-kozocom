@@ -13,8 +13,7 @@ from typing import Any
 
 import structlog
 
-from ..agents.graph import graph
-from ..agents.state import PRContext
+from ..agents import graph, PRContext
 from ..app.services.github import GitHubService
 from ..chat.context import CommandContext
 from ..chat.handler import CommandHandler
@@ -46,7 +45,7 @@ async def _run_review(
     pr_details = await github.get_pr_details(owner, repo, pr_number)
 
     initial_state = {
-        "context": PRContext(
+        "pr_context": PRContext(
             owner=owner,
             repo=repo,
             pr_number=pr_number,
@@ -54,9 +53,10 @@ async def _run_review(
             author=pr_details.get("user", {}).get("login", ""),
             installation_id=installation_id,
             base_branch=pr_details.get("base", {}).get("ref", "main"),
+            head_branch=pr_details.get("head", {}).get("ref", ""),
             is_draft=pr_details.get("draft", False),
         ),
-        "files": [],
+        "file_diffs": [],
         "comments": [],
         "final_comments": [],
         "summary": "",

@@ -6,14 +6,24 @@ Using Pydantic ensures type safety and automatic validation.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 __all__ = [
     "AgentFinding",
     "AgentFindings",
     "FixResult",
     "ExplainResult",
+    "Evidence",
 ]
+
+
+class Evidence(BaseModel):
+    """Evidence citation for a finding."""
+
+    source_file: str = Field(description="File containing the evidence")
+    source_function: str = Field(description="Function name in the evidence")
+    quote: str = Field(description="Exact code quote proving the issue")
+    line_number: int | None = Field(default=None, description="Line number if available")
 
 
 class AgentFinding(BaseModel):
@@ -47,6 +57,17 @@ class AgentFinding(BaseModel):
         ge=0.0,
         le=1.0,
     )
+    evidence: Evidence | None = Field(
+        default=None,
+        description="Citation proving this issue (strongly recommended for confidence >= 0.85)"
+    )
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_high_confidence(cls, v: float, info) -> float:
+        if v >= 0.90 and not info.data.get("evidence"):
+            return 0.84
+        return v
 
 
 class AgentFindings(BaseModel):

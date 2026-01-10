@@ -1,208 +1,144 @@
+"""State management for the PR review workflow.
+
+Defines the state schema and data models for the LangGraph workflow.
+Uses Python 3.14 features for cleaner type definitions.
+"""
+
 import operator
+from dataclasses import dataclass, field
 from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from ..ast.models import ASTInfo, RelatedCode
+from ..analysis.call_graph import CallGraph
+from ..analysis.context_builder import FunctionContext, ReviewContext
+from ..analysis.diff_extractor import ChangeType, FileDiff
+from ..analysis.impact_analyzer import FunctionImpact, ImpactLevel, ImpactReport
 from ..core.config import ReviewerConfig
 
 __all__ = [
-    "FileChange",
-    "EnhancedFileChange",
-    "ReviewComment",
     "PRContext",
-    "GraphState",
+    "ReviewComment",
+    "ReviewState",
+    "FunctionReviewInput",
 ]
 
-
-class FileChange(BaseModel):
-    """A file changed in the PR."""
-
-    filename: str
-    status: Literal["added", "modified", "removed", "renamed"]
-    additions: int
-    deletions: int
-    patch: str  # Git diff
-    language: str | None = None
+type Severity = Literal["critical", "warning", "info", "suggestion"]
+type ReviewDepth = Literal["deep", "standard", "quick"]
 
 
-class EnhancedFileChange(BaseModel):
-    """A file changed in the PR with enriched context."""
-
-    filename: str
-    status: Literal["added", "modified", "removed", "renamed"]
-    additions: int
-    deletions: int
-    patch: str  # Git diff
-    language: str | None = None
-
-    full_content: str | None = None
-    ast_info: ASTInfo | None = None
-    related_context: list[RelatedCode] = Field(default_factory=list)
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    def format_for_prompt(self) -> str:
-        """Format file change for LLM prompt with enhanced context.
-
-        Includes:
-        - Diff content
-        - Enhanced code structure (functions with signatures, types, decorators)
-        - Class inheritance info
-        - Related code from RAG
-        """
-        lines = [f"## File: {self.filename}", "", "### Diff:", "```", self.patch, "```"]
-
-        # Add enhanced AST info if available
-        if self.ast_info and (self.ast_info.functions or self.ast_info.classes):
-            lines.extend(["", "### Code Structure:"])
-
-            # Enhanced function info with types and decorators
-            for func in self.ast_info.functions:
-                func_desc = self._format_function_info(func)
-                lines.append(func_desc)
-
-            # Enhanced class info with inheritance
-            for cls in self.ast_info.classes:
-                cls_desc = self._format_class_info(cls)
-                lines.append(cls_desc)
-
-        # Add related context (top 3)
-        if self.related_context:
-            lines.extend(["", "### Related Code from Codebase:"])
-            for ctx in self.related_context[:3]:
-                lines.extend(
-                    [
-                        "",
-                        f"**{ctx.relationship.upper()}**: `{ctx.file_path}` - `{ctx.name}`",
-                        "```",
-                        ctx.content[:500],
-                        "```",
-                    ]
-                )
-
-        return "\n".join(lines)
-
-    def _format_function_info(self, func) -> str:
-        """Format FunctionInfo with enhanced details."""
-        parts: list[str] = []
-
-        # Decorators
-        if hasattr(func, "decorators") and func.decorators:
-            parts.append(f"  @{', @'.join(func.decorators)}")
-
-        # Async indicator
-        prefix = "async " if getattr(func, "is_async", False) else ""
-
-        # Function signature with types
-        if hasattr(func, "parameters") and func.parameters:
-            params = ", ".join(
-                f"{p.name}: {p.type_hint}" if p.type_hint else p.name for p in func.parameters
-            )
-            sig = f"{prefix}def {func.name}({params})"
-        else:
-            sig = f"{prefix}def {func.name}()"
-
-        # Return type
-        if hasattr(func, "return_type") and func.return_type:
-            sig += f" -> {func.return_type}"
-
-        parts.append(f"- **Function**: `{sig}`")
-
-        # Docstring summary
-        if hasattr(func, "docstring") and func.docstring:
-            # First line of docstring
-            doc_summary = func.docstring.split("\n")[0][:100]
-            parts.append(f"  - Doc: {doc_summary}")
-
-        return "\n".join(parts)
-
-    def _format_class_info(self, cls) -> str:
-        """Format ClassInfo with enhanced details."""
-        parts: list[str] = []
-
-        # Decorators
-        if hasattr(cls, "decorators") and cls.decorators:
-            parts.append(f"  @{', @'.join(cls.decorators)}")
-
-        # Class with inheritance
-        if hasattr(cls, "base_classes") and cls.base_classes:
-            inheritance = f"({', '.join(cls.base_classes)})"
-        else:
-            inheritance = ""
-
-        parts.append(f"- **Class**: `{cls.name}{inheritance}`")
-
-        # Methods
-        if cls.methods:
-            methods_str = ", ".join(cls.methods[:5])
-            if len(cls.methods) > 5:
-                methods_str += f" ... (+{len(cls.methods) - 5} more)"
-            parts.append(f"  - Methods: {methods_str}")
-
-        # Docstring summary
-        if hasattr(cls, "docstring") and cls.docstring:
-            doc_summary = cls.docstring.split("\n")[0][:100]
-            parts.append(f"  - Doc: {doc_summary}")
-
-        return "\n".join(parts)
-
-
-class ReviewComment(BaseModel):
-    """A review comment from an agent."""
-
-    file: str
-    line: int
-    severity: Literal["critical", "warning", "info", "suggestion"]
-    category: str  # security, style, logic
-    message: str
-    suggestion: str | None = None
-    confidence: float = Field(ge=0.0, le=1.0)
-    agent: str  # Which agent created this
-
-    # RAG context - which files were used to inform this comment
-    related_files: list[str] = Field(default_factory=list)
-
-    # Code suggestion - actual code fix example
-    code_suggestion: str | None = None
-
-
-class PRContext(BaseModel):
+@dataclass(frozen=True, slots=True)
+class PRContext:
     """Context about the PR being reviewed."""
-
+    
     owner: str
     repo: str
     pr_number: int
     title: str
     author: str
     installation_id: int
-    base_branch: str = "main"
+    base_branch: str
+    head_branch: str
     is_draft: bool = False
 
 
-class GraphState(TypedDict):
-    """State passed through the LangGraph workflow."""
+class ReviewComment(BaseModel):
+    """A review comment to post to GitHub."""
+    
+    file: str
+    line: int
+    severity: Severity
+    category: str
+    message: str
+    suggestion: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+    agent: str = "function_reviewer"
+    
+    # Code suggestion with language hint
+    code_suggestion: str | None = None
+    
+    # Context used for this comment
+    related_context: list[str] = Field(default_factory=list)
+    
+    model_config = {"frozen": True}
 
-    # Input
-    context: PRContext
 
-    # Configuration - per-repository settings
+@dataclass(slots=True)
+class FunctionReviewInput:
+    """Input for reviewing a single function."""
+    
+    function_context: FunctionContext
+    review_depth: ReviewDepth = "standard"
+    focus_areas: list[str] = field(default_factory=list)
+
+
+class ReviewState(TypedDict, total=False):
+    """State passed through the LangGraph workflow.
+    
+    Uses TypedDict with total=False for optional fields.
+    Fields are added progressively as the workflow executes.
+    """
+    
+    # =========================================================================
+    # Input (from webhook)
+    # =========================================================================
+    pr_context: PRContext
     repo_config: ReviewerConfig
-
-    # Extracted
-    files: list[FileChange]
-
-    # Router decisions: {filename: [agents to run]}
-    routing_decisions: dict[str, list[str]]
-
-    # Agent outputs (merged via operator.add)
+    
+    # =========================================================================
+    # Phase 1: Diff Analysis (deterministic)
+    # =========================================================================
+    file_diffs: list[FileDiff]
+    function_changes: dict[str, dict]  # {func_name: {type, old, new}}
+    new_files: list[str]
+    deleted_files: list[str]
+    
+    # =========================================================================
+    # Phase 2: Impact Analysis (AST-based)
+    # =========================================================================
+    call_graph: CallGraph
+    impact_report: ImpactReport
+    
+    # =========================================================================
+    # Phase 3: Review (LLM-based)
+    # =========================================================================
+    review_context: ReviewContext
+    functions_to_review: list[FunctionReviewInput]
+    
+    # Review outputs (merged via operator.add)
     comments: Annotated[list[ReviewComment], operator.add]
-
-    # Aggregated
+    
+    # =========================================================================
+    # Aggregation & Output
+    # =========================================================================
     final_comments: list[ReviewComment]
     summary: str
-
-    # Output
-    acknowledge_comment_id: int | None  # Initial notification comment
     review_id: int | None
-    errors: list[str]
+    errors: list[str] | None
+    
+    # =========================================================================
+    # Workflow Control
+    # =========================================================================
+    skip_review: bool
+    skip_reason: str | None
+
+
+def create_initial_state(
+    pr_context: PRContext,
+    repo_config: ReviewerConfig | None = None,
+) -> ReviewState:
+    """Create initial state for workflow.
+    
+    Args:
+        pr_context: PR context from webhook.
+        repo_config: Repository configuration.
+        
+    Returns:
+        Initial ReviewState with required fields.
+    """
+    return ReviewState(
+        pr_context=pr_context,
+        repo_config=repo_config or ReviewerConfig(),
+        comments=[],
+        skip_review=False,
+    )
