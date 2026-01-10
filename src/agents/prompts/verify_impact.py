@@ -69,4 +69,22 @@ For each file with real usages:
 Also indicate:
 - Whether you need more search queries to be confident
 - Your confidence level in the analysis
+
+## CRITICAL: additional_queries Format
+
+If you need more searches, provide `additional_queries` as **PLAIN TEXT STRINGS ONLY**.
+
+### GOOD additional_queries examples:
+- `processPayment(`
+- `->methodName(`
+- `STATUS_PENDING`
+- `ClassName::constantName`
+
+### BAD additional_queries (DO NOT USE):
+- `grep -r "pattern" .` (NO shell commands!)
+- `rg --json "pattern"` (NO ripgrep commands!)
+- `processPayment\\(` (NO escaping!)
+- `.*pattern.*` (NO regex syntax!)
+
+The search system will handle escaping and execution automatically.
 """

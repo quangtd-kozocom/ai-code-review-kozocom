@@ -292,7 +292,11 @@ async def run_review(state: ReviewState) -> ReviewState:
     compiled = graph.compile()
 
     try:
-        result = await compiled.ainvoke(state)
+        # Dynamic limit: base + per-file allowance
+        file_count = len(state.get("file_diffs", []) or [1])
+        recursion_limit = max(100, file_count * 15)
+        
+        result = await compiled.ainvoke(state, config={"recursion_limit": recursion_limit})
 
         # Track repo_path for cleanup on error
         repo_path = result.get("repo_path")

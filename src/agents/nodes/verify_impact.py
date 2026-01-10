@@ -2,7 +2,7 @@
 
 import structlog
 
-from ...core.llm import get_structured_llm
+from ...core.llm import get_structured_llm, invoke_with_retry
 from ..constants import (
     CRITICAL_CALLER_THRESHOLD,
     MAX_SEARCH_ITERATIONS,
@@ -76,7 +76,7 @@ async def run(state: ReviewState) -> dict:
     llm = get_structured_llm(ImpactVerificationResult)
 
     try:
-        result: ImpactVerificationResult = await llm.ainvoke(prompt)
+        result: ImpactVerificationResult = await invoke_with_retry(llm, prompt)
         log.debug(
             "verify_impact.llm_response",
             entity=change.entity_name,
@@ -133,8 +133,8 @@ async def run(state: ReviewState) -> dict:
         affected_files=[c.file_path for c in verified_callers],
     )
 
-    # If we have verified callers, create a breaking change
-    file_breaking_changes = state.get("file_breaking_changes", [])
+    # If we have verified callers, create or update breaking change
+    file_breaking_changes = {bc.entity_name: bc for bc in state.get("file_breaking_changes", [])}
 
     if verified_callers:
         severity = (
@@ -143,34 +143,37 @@ async def run(state: ReviewState) -> dict:
             else SEVERITY_WARNING
         )
 
-        breaking_change = BreakingChange(
-            entity_type=change.entity_type,
-            entity_name=change.entity_name,
-            class_name=change.class_name,
-            file_path=change.file_path,
-            change_type=change.change_type,
-            old_definition=change.old_definition,
-            new_definition=change.new_definition,
-            change_detail=change.change_detail,
-            line=change.line,
-            affected_callers=verified_callers,
-            severity=severity,
-            recommendation=_generate_recommendation(change, verified_callers),
-        )
-        file_breaking_changes = [*file_breaking_changes, breaking_change]
-
-        log.info(
-            "verify_impact.breaking_change_created",
-            entity=change.entity_name,
-            severity=severity,
-            affected_count=len(verified_callers),
-        )
+        if change.entity_name in file_breaking_changes:
+            # Merge new callers into existing
+            existing = file_breaking_changes[change.entity_name]
+            seen = {(c.file_path, c.line) for c in existing.affected_callers}
+            new_callers = [c for c in verified_callers if (c.file_path, c.line) not in seen]
+            if new_callers:
+                existing.affected_callers.extend(new_callers)
+                log.info("verify_impact.callers_merged", entity=change.entity_name, added=len(new_callers))
+        else:
+            # Create new breaking change
+            file_breaking_changes[change.entity_name] = BreakingChange(
+                entity_type=change.entity_type,
+                entity_name=change.entity_name,
+                class_name=change.class_name,
+                file_path=change.file_path,
+                change_type=change.change_type,
+                old_definition=change.old_definition,
+                new_definition=change.new_definition,
+                change_detail=change.change_detail,
+                line=change.line,
+                affected_callers=verified_callers,
+                severity=severity,
+                recommendation=_generate_recommendation(change, verified_callers),
+            )
+            log.info("verify_impact.breaking_change_created", entity=change.entity_name, callers=len(verified_callers))
 
     return {
         "verified_callers": verified_callers,
         "need_more_search": need_more,
         "additional_queries": result.additional_queries if need_more else [],
-        "file_breaking_changes": file_breaking_changes,
+        "file_breaking_changes": list(file_breaking_changes.values()),
     }
 
 

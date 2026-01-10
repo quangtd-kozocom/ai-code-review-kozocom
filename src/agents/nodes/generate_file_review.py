@@ -2,7 +2,7 @@
 
 import structlog
 
-from ...core.llm import get_structured_llm
+from ...core.llm import get_structured_llm, invoke_with_retry
 from ..models import FileReviewResult
 from ..prompts.generate_review import GENERATE_REVIEW_PROMPT
 from ..state import AffectedCaller, BreakingChange, ReviewComment, ReviewState
@@ -55,7 +55,7 @@ async def run(state: ReviewState) -> dict:
         llm = get_structured_llm(FileReviewResult)
 
         try:
-            result: FileReviewResult = await llm.ainvoke(prompt)
+            result: FileReviewResult = await invoke_with_retry(llm, prompt)
 
             for comment in result.comments:
                 file_comments.append(ReviewComment(

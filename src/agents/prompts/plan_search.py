@@ -23,37 +23,29 @@ PLAN_SEARCH_PROMPT = """You need to find all usages of a changed code entity acr
 
 ## Your Task
 
-Generate search queries that will find ALL callers/usages of this entity.
+Generate search queries (simple text patterns) to find ALL callers/usages of this entity.
 
-### Language-Specific Patterns:
+### Examples of GOOD queries:
+- `processPayment(`
+- `->methodName(`
+- `ClassName::methodName(`
+- `STATUS_PENDING`
 
-**PHP:**
-- Function calls: `functionName(`
-- Static method: `ClassName::methodName(`
-- Instance method: `->methodName(`
-
-**TypeScript/JavaScript:**
-- Function calls: `functionName(`
-- Method calls: `.methodName(`
-
-**Python:**
-- Function calls: `function_name(`
-- Method calls: `.method_name(`
-
-**Go:**
-- Function calls: `functionName(`
-- Method calls: `.MethodName(`
+### Examples of BAD queries (DO NOT USE):
+- `grep -r ...` (NO shell commands!)
+- `processPayment\\(` (NO escaping!)
+- `.*processPayment.*` (NO regex!)
 
 ### Guidelines:
-1. Use simple, literal text queries (NO regex escaping, NO backslashes)
-2. Include multiple patterns for different call styles
-3. Exclude test files, vendor directories
+1. Return ONLY simple text strings to search for
+2. Include the opening parenthesis for function/method calls
+3. Include multiple patterns for different call styles
 
 ## Output
 
 Provide:
-1. Search queries as PLAIN TEXT (e.g., `processPayment(` not `processPayment\\(`)
-2. File patterns to include
-3. File patterns to exclude
-4. Brief reasoning
+1. queries: List of simple text strings (NOT shell commands, NOT regex)
+2. include_patterns: File glob patterns like `*.php`
+3. exclude_patterns: Patterns to exclude like `*Test.php`, `vendor/*`
+4. reasoning: Brief explanation
 """
