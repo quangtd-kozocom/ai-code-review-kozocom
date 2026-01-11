@@ -1,9 +1,8 @@
 # src/core/repositories/review_repository.py
 from datetime import datetime, timedelta
 from typing import Any
-from sqlalchemy import func
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Repository, PRReview, BreakingChange, AffectedCaller, ReviewComment
 
@@ -18,8 +17,8 @@ class ReviewRepository:
     # Repository
     # ─────────────────────────────────────────────────────────────
     async def get_or_create_repo(self, owner: str, name: str, installation_id: int) -> Repository:
-        result = await self.session.exec(select(Repository).where(Repository.owner == owner, Repository.name == name))
-        if repo := result.first():
+        result = await self.session.execute(select(Repository).where(Repository.owner == owner, Repository.name == name))
+        if repo := result.scalars().first():
             return repo
         repo = Repository(owner=owner, name=name, installation_id=installation_id)
         self.session.add(repo)
@@ -27,8 +26,8 @@ class ReviewRepository:
         return repo
 
     async def list_repos(self) -> list[Repository]:
-        result = await self.session.exec(select(Repository).order_by(Repository.last_review_at.desc()))
-        return list(result.all())
+        result = await self.session.execute(select(Repository).order_by(Repository.last_review_at.desc()))
+        return list(result.scalars().all())
 
     async def get_repo(self, repo_id: int) -> Repository | None:
         return await self.session.get(Repository, repo_id)
@@ -44,14 +43,14 @@ class ReviewRepository:
         return review
 
     async def get_review(self, review_id: int) -> PRReview | None:
-        result = await self.session.exec(select(PRReview).where(PRReview.id == review_id))
-        return result.first()
+        result = await self.session.execute(select(PRReview).where(PRReview.id == review_id))
+        return result.scalars().first()
 
     async def get_review_by_pr(self, repository_id: int, pr_number: int) -> PRReview | None:
-        result = await self.session.exec(
+        result = await self.session.execute(
             select(PRReview).where(PRReview.repository_id == repository_id, PRReview.pr_number == pr_number)
         )
-        return result.first()
+        return result.scalars().first()
 
     async def list_reviews(self, skip: int = 0, limit: int = 20, period: str | None = None, repository_id: int | None = None) -> list[PRReview]:
         query = select(PRReview).order_by(PRReview.created_at.desc())
@@ -60,8 +59,8 @@ class ReviewRepository:
             query = query.where(PRReview.created_at >= datetime.now() - timedelta(days=days))
         if repository_id:
             query = query.where(PRReview.repository_id == repository_id)
-        result = await self.session.exec(query.offset(skip).limit(limit))
-        return list(result.all())
+        result = await self.session.execute(query.offset(skip).limit(limit))
+        return list(result.scalars().all())
 
     # ─────────────────────────────────────────────────────────────
     # Breaking Changes & Comments
@@ -78,12 +77,12 @@ class ReviewRepository:
         return bc
 
     async def get_breaking_changes(self, review_id: int) -> list[BreakingChange]:
-        result = await self.session.exec(select(BreakingChange).where(BreakingChange.review_id == review_id))
-        return list(result.all())
+        result = await self.session.execute(select(BreakingChange).where(BreakingChange.review_id == review_id))
+        return list(result.scalars().all())
 
     async def get_affected_callers(self, bc_id: int) -> list[AffectedCaller]:
-        result = await self.session.exec(select(AffectedCaller).where(AffectedCaller.breaking_change_id == bc_id))
-        return list(result.all())
+        result = await self.session.execute(select(AffectedCaller).where(AffectedCaller.breaking_change_id == bc_id))
+        return list(result.scalars().all())
 
     async def add_comment(self, review_id: int, data: dict[str, Any]) -> ReviewComment:
         comment = ReviewComment(review_id=review_id, **data)
@@ -92,8 +91,8 @@ class ReviewRepository:
         return comment
 
     async def get_comments(self, review_id: int) -> list[ReviewComment]:
-        result = await self.session.exec(select(ReviewComment).where(ReviewComment.review_id == review_id))
-        return list(result.all())
+        result = await self.session.execute(select(ReviewComment).where(ReviewComment.review_id == review_id))
+        return list(result.scalars().all())
 
     # ─────────────────────────────────────────────────────────────
     # Stats
@@ -101,7 +100,7 @@ class ReviewRepository:
     async def get_stats(self, period: str | None = None) -> dict[str, Any]:
         days = {"week": 7, "month": 30, "quarter": 90}.get(period or "month", 30)
         since = datetime.now() - timedelta(days=days)
-        result = await self.session.exec(
+        result = await self.session.execute(
             select(
                 func.count(PRReview.id).label("total"),
                 func.coalesce(func.sum(PRReview.count_critical + PRReview.count_warning), 0).label("errors"),
@@ -120,7 +119,7 @@ class ReviewRepository:
     async def get_developer_stats(self, period: str | None = None, limit: int = 10) -> list[dict]:
         days = {"week": 7, "month": 30, "quarter": 90}.get(period or "month", 30)
         since = datetime.now() - timedelta(days=days)
-        result = await self.session.exec(
+        result = await self.session.execute(
             select(PRReview.pr_author, func.sum(PRReview.count_critical + PRReview.count_warning).label("errors"))
             .where(PRReview.status == "completed", PRReview.created_at >= since, PRReview.pr_author.isnot(None))
             .group_by(PRReview.pr_author)
@@ -132,7 +131,7 @@ class ReviewRepository:
     async def get_weekly_trend(self, weeks: int = 8) -> list[dict]:
         since = datetime.now() - timedelta(weeks=weeks)
         week_col = func.date_trunc("week", PRReview.created_at).label("week")
-        result = await self.session.exec(
+        result = await self.session.execute(
             select(week_col, func.sum(PRReview.count_critical + PRReview.count_warning).label("errors"))
             .where(PRReview.status == "completed", PRReview.created_at >= since)
             .group_by(week_col)
