@@ -95,7 +95,7 @@ NODE_VERIFY_IMPACT = "verify_impact"
 NODE_NEXT_CHANGE = "next_change"
 NODE_GENERATE_REVIEW = "generate_review"
 NODE_PUBLISH_GITHUB = "publish_github"
-NODE_PUBLISH_SUMMARY = "publish_summary"
+NODE_FINALIZE_REVIEW = "finalize_review"
 NODE_CLEANUP = "cleanup"
 
 # ═══════════════════════════════════════════════════════════════════════════════
