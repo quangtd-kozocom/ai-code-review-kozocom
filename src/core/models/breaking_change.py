@@ -40,5 +40,4 @@ class BreakingChange(SQLModel, table=True):
             "severity": self.severity,
             "affected_count": self.affected_count,
             "recommendation": self.recommendation,
-            "affected_callers": [c.to_dict() for c in self.affected_callers] if self.affected_callers else [],
         }

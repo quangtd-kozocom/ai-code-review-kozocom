@@ -43,7 +43,8 @@ class ReviewRepository:
         return review
 
     async def get_review(self, review_id: int) -> PRReview | None:
-        result = await self.session.execute(select(PRReview).where(PRReview.id == review_id))
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(select(PRReview).options(selectinload(PRReview.repository)).where(PRReview.id == review_id))
         return result.scalars().first()
 
     async def get_review_by_pr(self, repository_id: int, pr_number: int) -> PRReview | None:
@@ -53,7 +54,8 @@ class ReviewRepository:
         return result.scalars().first()
 
     async def list_reviews(self, skip: int = 0, limit: int = 20, period: str | None = None, repository_id: int | None = None) -> list[PRReview]:
-        query = select(PRReview).order_by(PRReview.created_at.desc())
+        from sqlalchemy.orm import selectinload
+        query = select(PRReview).options(selectinload(PRReview.repository)).order_by(PRReview.created_at.desc())
         if period:
             days = {"week": 7, "month": 30, "quarter": 90}.get(period, 30)
             query = query.where(PRReview.created_at >= datetime.now() - timedelta(days=days))
