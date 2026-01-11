@@ -62,4 +62,17 @@ For each breaking change found, provide:
 5. **Line number in the NEW file** where this entity is defined (look at the diff hunk headers like @@ -X,Y +Z,W @@ to determine line numbers)
 
 Be thorough but precise. Only flag changes that could genuinely break existing code.
+{language_instruction}
 """
+
+
+def get_analyze_file_prompt(output_language: str = "en") -> str:
+    """Get analyze file prompt with language instruction."""
+    lang_instructions = {
+        "en": "",
+        "vi": "\n**IMPORTANT: Write ALL descriptions (change_detail) in Vietnamese (Tiếng Việt).**",
+        "ja": "\n**IMPORTANT: Write ALL descriptions (change_detail) in Japanese (日本語).**",
+        "zh": "\n**IMPORTANT: Write ALL descriptions (change_detail) in Chinese (中文).**",
+    }
+    instruction = lang_instructions.get(output_language, "")
+    return ANALYZE_FILE_PROMPT.replace("{language_instruction}", instruction)

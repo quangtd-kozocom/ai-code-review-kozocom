@@ -15,6 +15,7 @@ class Repository(SQLModel, table=True):
     last_review_at: datetime | None = None
 
     reviews: list["PRReview"] = Relationship(back_populates="repository", cascade_delete=True)
+    config: "RepoConfig" = Relationship(back_populates="repository", cascade_delete=True, sa_relationship_kwargs={"uselist": False})
 
     @property
     def full_name(self) -> str:

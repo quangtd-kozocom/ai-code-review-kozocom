@@ -4,7 +4,7 @@ import structlog
 
 from ...core.llm import get_structured_llm, invoke_with_retry
 from ..models import FileReviewResult
-from ..prompts.generate_review import GENERATE_REVIEW_PROMPT
+from ..prompts.generate_review import get_generate_review_prompt
 from ..state import AffectedCaller, BreakingChange, ReviewComment, ReviewState
 
 log = structlog.get_logger()
@@ -35,12 +35,17 @@ async def run(state: ReviewState) -> dict:
     )
 
     file_comments: list[ReviewComment] = []
+    
+    # Get output language from config
+    config = state.get("config")
+    output_language = config.output_language if config else "en"
+    prompt_template = get_generate_review_prompt(output_language)
 
     for bc in breaking_changes:
         # Format affected callers for prompt
         callers_text = _format_affected_callers(bc.affected_callers)
 
-        prompt = GENERATE_REVIEW_PROMPT.format(
+        prompt = prompt_template.format(
             file_path=bc.file_path,
             entity_name=bc.entity_name,
             entity_type=bc.entity_type,

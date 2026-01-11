@@ -40,6 +40,21 @@ async def _run_review(
     """Async implementation of PR review workflow."""
     log.info("Starting review", owner=owner, repo=repo, pr=pr_number)
 
+    # Get config (from cache or DB, auto-creates if not exists)
+    from ..core.services import get_config_service
+    config_service = await get_config_service()
+    config = await config_service.get_config(owner, repo, installation_id)
+
+    # Check if review is enabled
+    if not config.enabled:
+        log.info("review.skipped", reason="disabled", owner=owner, repo=repo)
+        return {"status": "skipped", "reason": "disabled"}
+
+    # Check auto_review flag
+    if not config.auto_review:
+        log.info("review.skipped", reason="manual_only", owner=owner, repo=repo)
+        return {"status": "skipped", "reason": "manual_only"}
+
     # Fetch PR details to populate title and author
     github = GitHubService(installation_id)
     pr_details = await github.get_pr_details(owner, repo, pr_number)
@@ -56,6 +71,7 @@ async def _run_review(
             head_branch=pr_details.get("head", {}).get("ref", ""),
             is_draft=pr_details.get("draft", False),
         ),
+        "config": config,  # Pass config to workflow
         "file_diffs": [],
         "all_breaking_changes": [],
         "all_comments": [],

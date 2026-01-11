@@ -10,7 +10,7 @@ from ..constants import (
     SEVERITY_WARNING,
 )
 from ..models import ImpactVerificationResult
-from ..prompts.verify_impact import VERIFY_IMPACT_PROMPT
+from ..prompts.verify_impact import get_verify_impact_prompt
 from ..state import AffectedCaller, BreakingChange, ReviewState
 
 log = structlog.get_logger()
@@ -58,10 +58,15 @@ async def run(state: ReviewState) -> dict:
         iteration=iteration,
     )
 
+    # Get output language from config
+    config = state.get("config")
+    output_lang = config.output_language if config else "en"
+
     # Format search results for prompt
     results_text = _format_search_results(search_results)
 
-    prompt = VERIFY_IMPACT_PROMPT.format(
+    prompt_template = get_verify_impact_prompt(output_lang)
+    prompt = prompt_template.format(
         entity_name=change.entity_name,
         entity_type=change.entity_type,
         file_path=change.file_path,
@@ -135,6 +140,10 @@ async def run(state: ReviewState) -> dict:
 
     # If we have verified callers, create or update breaking change
     file_breaking_changes = {bc.entity_name: bc for bc in state.get("file_breaking_changes", [])}
+    
+    # Get output language from config
+    config = state.get("config")
+    output_lang = config.output_language if config else "en"
 
     if verified_callers:
         severity = (
@@ -165,7 +174,7 @@ async def run(state: ReviewState) -> dict:
                 line=change.line,
                 affected_callers=verified_callers,
                 severity=severity,
-                recommendation=_generate_recommendation(change, verified_callers),
+                recommendation=_generate_recommendation(change, verified_callers, output_lang),
             )
             log.info("verify_impact.breaking_change_created", entity=change.entity_name, callers=len(verified_callers))
 
@@ -191,26 +200,18 @@ def _format_search_results(results: list) -> str:
     return "\n".join(lines)
 
 
-def _generate_recommendation(change, callers: list[AffectedCaller]) -> str:
+def _generate_recommendation(change, callers: list[AffectedCaller], lang: str = "en") -> str:
     """Generate a recommendation based on the change type."""
     from ..constants import CHANGE_DELETED, CHANGE_SIGNATURE, CHANGE_VISIBILITY
+    from ..locales import t
 
-    caller_count = len(callers)
+    count = len(callers)
 
     if change.change_type == CHANGE_SIGNATURE:
-        return (
-            f"Add a default value for the new parameter, or update all "
-            f"{caller_count} caller(s) to pass the required argument."
-        )
+        return t("rec_signature", lang, count=count)
     elif change.change_type == CHANGE_DELETED:
-        return (
-            f"Restore the {change.entity_type} or update all "
-            f"{caller_count} caller(s) to use an alternative."
-        )
+        return t("rec_deleted", lang, count=count, entity_type=change.entity_type)
     elif change.change_type == CHANGE_VISIBILITY:
-        return (
-            f"Keep the {change.entity_type} public, or refactor "
-            f"{caller_count} caller(s) to use a public API."
-        )
+        return t("rec_visibility", lang, count=count, entity_type=change.entity_type)
     else:
-        return f"Review and update all {caller_count} affected caller(s)."
+        return t("rec_default", lang, count=count)

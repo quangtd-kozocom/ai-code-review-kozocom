@@ -72,6 +72,9 @@ def _handle_pull_request(payload: dict) -> dict:
 
     pr = payload["pull_request"]
     repo = payload["repository"]
+    owner = repo["owner"]["login"]
+    repo_name = repo["name"]
+    installation_id = payload["installation"]["id"]
 
     log.info(
         "PR event received",
@@ -83,10 +86,10 @@ def _handle_pull_request(payload: dict) -> dict:
     from ....workers.tasks import review_pr
 
     review_pr.delay(
-        owner=repo["owner"]["login"],
-        repo=repo["name"],
+        owner=owner,
+        repo=repo_name,
         pr_number=pr["number"],
-        installation_id=payload["installation"]["id"],
+        installation_id=installation_id,
     )
 
     return {"status": "queued", "pr": pr["number"]}
