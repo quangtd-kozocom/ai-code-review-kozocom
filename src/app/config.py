@@ -39,9 +39,6 @@ class Settings(BaseSettings):
     SLACK_BOT_TOKEN: str | None = None
     SLACK_CHANNEL: str = "#pr-reviews"
 
-    # API (kozocom-flow-ai)
-    API_BASE_URL: str = "http://localhost:9000/api/v1"
-
     # Sentry
     SENTRY_DSN: str | None = None
 

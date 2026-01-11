@@ -57,7 +57,7 @@ def get_engine() -> AsyncEngine:
 
         _engine = create_async_engine(
             db_url,
-            echo=settings.DEBUG,
+            echo=False,  # Disable SQL logging
             pool_size=DEFAULT_DB_POOL_SIZE,
             max_overflow=DEFAULT_DB_MAX_OVERFLOW,
             pool_pre_ping=True,
@@ -97,7 +97,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
 async def init_db() -> None:
     """Initialize database - create all tables."""
     # Import models to register them with SQLModel.metadata
-    from .config.models import ConfigModel  # noqa: F401
+    from .models import Repository, PRReview, BreakingChange, AffectedCaller, ReviewComment  # noqa: F401
 
     engine = get_engine()
     async with engine.begin() as conn:
