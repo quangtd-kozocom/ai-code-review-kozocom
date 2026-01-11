@@ -140,8 +140,11 @@ async def get_review(review_id: int, repo: Repo) -> dict[str, Any]:
         raise HTTPException(404, "Review not found")
     result = review.to_dict()
     bcs = await repo.get_breaking_changes(review_id)
+    breaking_changes = []
     for bc in bcs:
-        bc.affected_callers = await repo.get_affected_callers(bc.id)
-    result["breaking_changes"] = [bc.to_dict() for bc in bcs]
+        bc_dict = bc.to_dict()
+        bc_dict["affected_callers"] = [c.to_dict() for c in await repo.get_affected_callers(bc.id)]
+        breaking_changes.append(bc_dict)
+    result["breaking_changes"] = breaking_changes
     result["comments"] = [c.to_dict() for c in await repo.get_comments(review_id)]
     return result
