@@ -97,7 +97,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
 async def init_db() -> None:
     """Initialize database - create all tables."""
     # Import models to register them with SQLModel.metadata
-    from .models import Repository, PRReview, BreakingChange, AffectedCaller, ReviewComment  # noqa: F401
+    from .models import Repository, PRReview, BreakingChange, AffectedCaller, ReviewComment, RepoConfig  # noqa: F401
 
     engine = get_engine()
     async with engine.begin() as conn:

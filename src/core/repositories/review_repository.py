@@ -140,3 +140,30 @@ class ReviewRepository:
             .order_by(week_col)
         )
         return [{"week": r[0].strftime("%b %d") if r[0] else "", "errors": r[1] or 0} for r in result.all()]
+
+    # ─────────────────────────────────────────────────────────────
+    # Config
+    # ─────────────────────────────────────────────────────────────
+    async def get_config(self, repository_id: int) -> "RepoConfig | None":
+        from ..models import RepoConfig
+        result = await self.session.execute(select(RepoConfig).where(RepoConfig.repository_id == repository_id))
+        return result.scalars().first()
+
+    async def get_or_create_config(self, repository_id: int) -> "RepoConfig":
+        from ..models import RepoConfig
+        config = await self.get_config(repository_id)
+        if not config:
+            config = RepoConfig(repository_id=repository_id)
+            self.session.add(config)
+            await self.session.flush()
+        return config
+
+    async def update_config(self, repository_id: int, data: dict[str, Any]) -> "RepoConfig":
+        from ..models import RepoConfig
+        config = await self.get_or_create_config(repository_id)
+        for key, value in data.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+        config.updated_at = datetime.now()
+        await self.session.flush()
+        return config

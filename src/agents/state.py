@@ -4,9 +4,13 @@ Defines the state schema and data models for the LangGraph workflow.
 Uses Python 3.14 features for cleaner type definitions.
 """
 
+from __future__ import annotations
+
 import operator
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
+
+from ..core.models import RepoConfig
 
 __all__ = [
     "PRContext",
@@ -146,6 +150,7 @@ class ReviewState(TypedDict, total=False):
     # Input
     # ───────────────────────────────────────────────────────────────────────────
     pr_context: PRContext
+    config: RepoConfig | None
 
     # ───────────────────────────────────────────────────────────────────────────
     # extract_diff + clone_repo

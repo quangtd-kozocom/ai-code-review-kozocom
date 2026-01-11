@@ -64,12 +64,12 @@ For each file with real usages:
 1. File path and line number
 2. The actual call/usage code
 3. Whether it will break (true/false)
-4. Specific reason why it will/won't break
+4. Specific reason why it will/won't break (break_reason)
 
 Also indicate:
 - Whether you need more search queries to be confident
 - Your confidence level in the analysis
-
+{language_instruction}
 ## CRITICAL: additional_queries Format
 
 If you need more searches, provide `additional_queries` as **PLAIN TEXT STRINGS ONLY**.
@@ -88,3 +88,15 @@ If you need more searches, provide `additional_queries` as **PLAIN TEXT STRINGS 
 
 The search system will handle escaping and execution automatically.
 """
+
+
+def get_verify_impact_prompt(output_language: str = "en") -> str:
+    """Get verify impact prompt with language instruction."""
+    lang_instructions = {
+        "en": "",
+        "vi": "\n**IMPORTANT: Write ALL break_reason descriptions in Vietnamese (Tiếng Việt).**\n",
+        "ja": "\n**IMPORTANT: Write ALL break_reason descriptions in Japanese (日本語).**\n",
+        "zh": "\n**IMPORTANT: Write ALL break_reason descriptions in Chinese (中文).**\n",
+    }
+    instruction = lang_instructions.get(output_language, "")
+    return VERIFY_IMPACT_PROMPT.replace("{language_instruction}", instruction)

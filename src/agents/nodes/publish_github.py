@@ -40,10 +40,16 @@ async def run(state: ReviewState) -> dict:
     """
     comments = state.get("file_comments", [])
     ctx = state.get("pr_context")
+    config = state.get("config")
 
     if not ctx:
         log.warning("publish_github.skipped", reason="no pr_context")
         return {}
+
+    # Check github_comment flag from config
+    if config and not config.github_comment:
+        log.info("publish_github.skipped", pr=ctx.pr_number, reason="github_comment disabled")
+        return {"all_comments": comments}
 
     if not comments:
         log.debug("publish_github.skipped", pr=ctx.pr_number, reason="no comments")
