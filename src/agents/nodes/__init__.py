@@ -5,11 +5,11 @@ from . import (
     clone_repo,
     execute_search,
     extract_diff,
+    finalize_review,
     generate_file_review,
     get_next_file,
     plan_search,
     publish_github,
-    publish_summary,
     verify_impact,
 )
 
@@ -23,5 +23,5 @@ __all__ = [
     "verify_impact",
     "generate_file_review",
     "publish_github",
-    "publish_summary",
+    "finalize_review",
 ]

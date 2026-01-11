@@ -17,12 +17,12 @@ from .constants import (
     NODE_CLONE_REPO,
     NODE_EXECUTE_SEARCH,
     NODE_EXTRACT_DIFF,
+    NODE_FINALIZE_REVIEW,
     NODE_GENERATE_REVIEW,
     NODE_GET_NEXT_FILE,
     NODE_NEXT_CHANGE,
     NODE_PLAN_SEARCH,
     NODE_PUBLISH_GITHUB,
-    NODE_PUBLISH_SUMMARY,
     NODE_VERIFY_IMPACT,
     ROUTE_END,
 )
@@ -31,11 +31,11 @@ from .nodes import (
     clone_repo,
     execute_search,
     extract_diff,
+    finalize_review,
     generate_file_review,
     get_next_file,
     plan_search,
     publish_github,
-    publish_summary,
     verify_impact,
 )
 from .state import ReviewState
@@ -61,11 +61,11 @@ def route_after_extract(state: ReviewState) -> Literal["clone_repo", "end"]:
 
 def route_after_get_file(
     state: ReviewState,
-) -> Literal["analyze_file", "publish_summary"]:
+) -> Literal["analyze_file", "finalize_review"]:
     """Route after getting next file - continue or finish."""
     if state.get("current_file") is None:
-        log.info("route.after_get_file", decision=NODE_PUBLISH_SUMMARY, reason="no more files")
-        return NODE_PUBLISH_SUMMARY
+        log.info("route.after_get_file", decision=NODE_FINALIZE_REVIEW, reason="no more files")
+        return NODE_FINALIZE_REVIEW
     log.debug(
         "route.after_get_file",
         decision=NODE_ANALYZE_FILE,
@@ -185,7 +185,7 @@ def create_review_graph() -> StateGraph:
        - Loop: verify may request more search
        - Loop: process all changes in file
        - generate_file_review → publish_github → get_next_file
-    3. After all files: publish_summary → cleanup → END
+    3. After all files: finalize_review → cleanup → END
     """
     log.debug("graph.creating")
 
@@ -204,7 +204,7 @@ def create_review_graph() -> StateGraph:
     graph.add_node(NODE_NEXT_CHANGE, next_change)
     graph.add_node(NODE_GENERATE_REVIEW, generate_file_review.run)
     graph.add_node(NODE_PUBLISH_GITHUB, publish_github.run)
-    graph.add_node(NODE_PUBLISH_SUMMARY, publish_summary.run)
+    graph.add_node(NODE_FINALIZE_REVIEW, finalize_review.run)
     graph.add_node(NODE_CLEANUP, cleanup_node)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -226,7 +226,7 @@ def create_review_graph() -> StateGraph:
     # File loop
     graph.add_conditional_edges(NODE_GET_NEXT_FILE, route_after_get_file, {
         NODE_ANALYZE_FILE: NODE_ANALYZE_FILE,
-        NODE_PUBLISH_SUMMARY: NODE_PUBLISH_SUMMARY,
+        NODE_FINALIZE_REVIEW: NODE_FINALIZE_REVIEW,
     })
 
     # Analysis → Search
@@ -255,7 +255,7 @@ def create_review_graph() -> StateGraph:
     })
 
     # Final summary and cleanup
-    graph.add_edge(NODE_PUBLISH_SUMMARY, NODE_CLEANUP)
+    graph.add_edge(NODE_FINALIZE_REVIEW, NODE_CLEANUP)
     graph.add_edge(NODE_CLEANUP, END)
 
     log.debug("graph.created", nodes=list(graph.nodes.keys()))

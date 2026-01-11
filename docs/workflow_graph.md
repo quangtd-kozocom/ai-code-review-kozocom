@@ -18,7 +18,7 @@ graph TD;
 	next_change(next_change)
 	generate_review(generate_review)
 	publish_github(publish_github)
-	publish_summary(publish_summary)
+	finalize_review(finalize_review)
 	cleanup(cleanup)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> extract_diff;
@@ -28,13 +28,13 @@ graph TD;
 	execute_search --> verify_impact;
 	extract_diff -. &nbsp;end&nbsp; .-> cleanup;
 	extract_diff -.-> clone_repo;
+	finalize_review --> cleanup;
 	generate_review --> publish_github;
 	get_next_file -.-> analyze_file;
-	get_next_file -.-> publish_summary;
+	get_next_file -.-> finalize_review;
 	next_change --> plan_search;
 	plan_search --> execute_search;
 	publish_github -.-> get_next_file;
-	publish_summary --> cleanup;
 	verify_impact -.-> generate_review;
 	verify_impact -.-> next_change;
 	verify_impact -.-> plan_search;

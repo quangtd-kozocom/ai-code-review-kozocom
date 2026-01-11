@@ -32,7 +32,7 @@ class TestReviewGraph:
             "next_change",
             "generate_review",
             "publish_github",
-            "publish_summary",
+            "finalize_review",
             "cleanup",
         }
 
