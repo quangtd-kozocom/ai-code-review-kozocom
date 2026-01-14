@@ -53,3 +53,5 @@ dmypy.json
 .DS_Store
 .pids
 .ruff_cache
+.gemini/
+gha-creds-*.json

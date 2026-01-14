@@ -3,7 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# New Breaking Change Detection Models
+# Breaking Change Detection Models
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -17,12 +17,8 @@ class AnalyzedChange(BaseModel):
     old_definition: str | None = Field(None, description="Old code/signature")
     new_definition: str | None = Field(None, description="New code/signature")
     change_detail: str = Field(description="Human-readable description of what changed")
-    could_break_callers: bool = Field(
-        description="Whether this change could break existing callers"
-    )
-    line: int = Field(
-        description="Line number in the NEW file where this change occurs (from diff)"
-    )
+    could_break_callers: bool = Field(description="Could break existing callers")
+    line: int = Field(description="Line number in the NEW file where this change occurs")
 
 
 class FileAnalysisResult(BaseModel):
@@ -30,28 +26,20 @@ class FileAnalysisResult(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # Accept both 'changes' and 'breaking_changes' from LLM
     changes: list[AnalyzedChange] = Field(
         default_factory=list,
         alias="breaking_changes",
         description="List of changes detected",
     )
-    summary: str = Field(
-        default="",
-        description="Brief summary of changes in this file",
-    )
+    summary: str = Field(default="", description="Brief summary of changes in this file")
 
 
 class SearchPlanResult(BaseModel):
     """LLM's plan for searching callers."""
 
     queries: list[str] = Field(default_factory=list, description="Search queries to find callers")
-    include_patterns: list[str] = Field(
-        default_factory=list, description="File patterns to include (e.g., *.php)"
-    )
-    exclude_patterns: list[str] = Field(
-        default_factory=list, description="File patterns to exclude (e.g., *test*)"
-    )
+    include_patterns: list[str] = Field(default_factory=list, description="Include patterns")
+    exclude_patterns: list[str] = Field(default_factory=list, description="Exclude patterns")
     reasoning: str = Field(default="", description="Why these queries will find relevant callers")
 
 
@@ -69,59 +57,49 @@ class ImpactVerificationResult(BaseModel):
     """Result of verifying impact on callers."""
 
     affected_callers: list[VerifiedCaller] = Field(default_factory=list)
-    need_more_search: bool = Field(default=False, description="Whether more searching is needed")
-    additional_queries: list[str] = Field(
-        default_factory=list, description="Additional queries if need_more_search"
-    )
-    confidence: float = Field(default=0.8, description="Confidence 0.0-1.0")  # Removed constraints
-    reasoning: str = Field(default="", description="Explanation of the analysis")
+    need_more_search: bool = Field(default=False)
+    additional_queries: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.8)
+    reasoning: str = Field(default="")
 
 
 class GeneratedComment(BaseModel):
     """A generated review comment."""
 
-    line: int = Field(default=1, description="Line number in the file")
-    severity: str = Field(default="warning", description="critical, warning, or info")
-    message: str = Field(default="", description="The comment message with full context")
-    recommendation: str = Field(default="", description="Suggested fix or action")
+    line: int = Field(default=1)
+    severity: str = Field(default="warning")
+    message: str = Field(default="")
+    recommendation: str = Field(default="")
 
 
 class FileReviewResult(BaseModel):
     """Result of generating review for a file."""
 
     comments: list[GeneratedComment] = Field(default_factory=list)
-    summary: str = Field(default="", description="Brief summary of issues found")
+    summary: str = Field(default="")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Legacy Models (for chat commands compatibility)
+# Fix Command Models
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class FixResult(BaseModel):
-    """Result of generating a code fix."""
+    """Result of generating a single code fix."""
 
     fixed_code: str = Field(description="The corrected code snippet")
-    explanation: str = Field(description="Explanation of what was fixed and why")
+    explanation: str = Field(description="Brief explanation of what was fixed")
 
 
-class AgentFinding(BaseModel):
-    """A single finding from an agent review."""
+class BatchFixItem(BaseModel):
+    """A single fix in a batch fix response."""
 
-    title: str = Field(description="Short title of the issue")
-    line: int = Field(ge=1, description="Line number in the file")
-    severity: str = Field(description="critical, warning, or info")
-    message: str = Field(description="Detailed explanation of the issue")
-    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score")
+    file: str = Field(description="File path")
+    fixed_code: str = Field(description="The corrected code snippet")
+    explanation: str = Field(description="Brief explanation")
 
 
-class AgentFindings(BaseModel):
-    """Collection of findings from an agent."""
+class BatchFixResult(BaseModel):
+    """Result of batch fixing multiple files."""
 
-    findings: list[AgentFinding] = Field(default_factory=list)
-
-
-class ExplainResult(BaseModel):
-    """Result of explaining code."""
-
-    explanation: str = Field(description="Explanation of the code")
+    fixes: list[BatchFixItem] = Field(default_factory=list)

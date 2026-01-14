@@ -19,6 +19,7 @@ from ..chat.context import CommandContext
 from ..chat.handler import CommandHandler
 from ..chat.parser import parse_command
 from ..core.constants import CELERY_COMMAND_RETRY_COUNTDOWN, CELERY_PR_RETRY_COUNTDOWN
+from ..core.database import reset_db
 from .celery_app import celery_app
 
 log = structlog.get_logger()
@@ -32,6 +33,9 @@ def review_pr(self, owner: str, repo: str, pr_number: int, installation_id: int)
     except Exception as e:
         log.exception("Review failed", owner=owner, repo=repo, pr=pr_number)
         raise self.retry(exc=e, countdown=CELERY_PR_RETRY_COUNTDOWN)
+    finally:
+        # Reset DB engine to prevent "attached to different loop" errors on next task
+        reset_db()
 
 
 async def _run_review(
@@ -141,6 +145,9 @@ def handle_command(
             comment_id=comment_id,
         )
         raise self.retry(exc=e, countdown=CELERY_COMMAND_RETRY_COUNTDOWN)
+    finally:
+        # Reset DB engine to prevent "attached to different loop" errors on next task
+        reset_db()
 
 
 async def _process_command(
@@ -162,7 +169,17 @@ async def _process_command(
         log.debug("No valid command found", body=comment_body[:100])
         return
 
-    # 2. Create unified context
+    # 2. Check if command is enabled in config
+    from ..core.services import get_config_service
+    config_service = await get_config_service()
+    config = await config_service.get_config(owner, repo, installation_id)
+    
+    commands_config = config.commands or {"fix": True}
+    if not commands_config.get(parsed.type.value, True):
+        log.info("Command disabled", command=parsed.type.value, repo=f"{owner}/{repo}")
+        return
+
+    # 3. Create unified context
     ctx = CommandContext(
         owner=owner,
         repo=repo,
@@ -173,12 +190,12 @@ async def _process_command(
         in_reply_to_id=in_reply_to_id,
     )
 
-    # 3. Execute command
+    # 4. Execute command
     github = GitHubService(installation_id)
     handler = CommandHandler(github)
     response = await handler.handle(command_type=parsed.type, ctx=ctx)
 
-    # 4. Post response
+    # 5. Post response
     formatted_response = f"@{author}\n\n{response}"
 
     if in_reply_to_id:

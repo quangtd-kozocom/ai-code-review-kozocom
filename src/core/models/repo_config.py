@@ -47,6 +47,9 @@ class RepoConfig(SQLModel, table=True):
     # Agents toggle
     agents: dict = Field(default_factory=lambda: {"breaking_change": True, "code_review": True}, sa_column=Column(JSONB, default={}))
     
+    # Commands toggle
+    commands: dict = Field(default_factory=lambda: {"fix": True}, sa_column=Column(JSONB, default={}))
+    
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -66,4 +69,5 @@ class RepoConfig(SQLModel, table=True):
             "slack_notify_on": self.slack_notify_on,
             "github_comment": self.github_comment,
             "agents": self.agents or {},
+            "commands": self.commands or {},
         }

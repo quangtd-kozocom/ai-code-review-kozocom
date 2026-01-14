@@ -48,27 +48,15 @@ _Copy these tests to your test file. Adjust imports if needed._
         "help_message": """\
 ## 🤖 AI Reviewer Commands
 
-| Command                    | Description                  |
-| -------------------------- | ---------------------------- |
-| `@reviewer fix this`       | Generate suggested fix       |
-| `@reviewer explain`        | Explain the issue in detail  |
-| `@reviewer generate tests` | Generate unit tests for PR   |
-| `@reviewer help`           | Show this help               |
+| Command | Description |
+| ------- | ----------- |
+| ``fix`` | Generate fixes for all affected files |
+| ``help`` | Show this help |
 
 ### Usage
 
-**Fix & Explain:** Reply directly to a review comment
-
-```
-@reviewer fix this
-```
-
-**Generate Tests:** Comment anywhere in the PR
-
-```
-@reviewer generate tests
-@reviewer generate tests for auth.py
-```
+Reply to a breaking change comment with the command ``fix``.
+The bot will parse the recommendation and generate fixes.
 """,
         # Error responses
         "error_no_parent_comment": """\
@@ -128,27 +116,15 @@ _Copy tests này vào test file của bạn. Adjust imports nếu cần._
         "help_message": """\
 ## 🤖 AI Reviewer Commands
 
-| Command                    | Mô tả                        |
-| -------------------------- | ---------------------------- |
-| `@reviewer fix this`       | Tạo suggested fix cho issue  |
-| `@reviewer explain`        | Giải thích chi tiết về issue |
-| `@reviewer generate tests` | Tạo unit tests cho PR        |
-| `@reviewer help`           | Hiện help này                |
+| Command | Mô tả |
+| ------- | ----- |
+| ``fix`` | Tạo fixes cho tất cả affected files |
+| ``help`` | Hiện help này |
 
 ### Cách sử dụng
 
-**Fix & Explain:** Reply trực tiếp vào review comment
-
-```
-@reviewer fix this
-```
-
-**Generate Tests:** Comment ở bất kỳ đâu trong PR
-
-```
-@reviewer generate tests
-@reviewer generate tests for auth.py
-```
+Reply vào breaking change comment với command ``fix``.
+Bot sẽ parse recommendation và generate fixes.
 """,
         # Error responses
         "error_no_parent_comment": """\
@@ -210,27 +186,15 @@ _これらのテストをテストファイルにコピーしてください。�
         "help_message": """\
 ## 🤖 AI Reviewer コマンド
 
-| コマンド                   | 説明                         |
-| -------------------------- | ---------------------------- |
-| `@reviewer fix this`       | 修正案を生成                 |
-| `@reviewer explain`        | 問題を詳しく説明             |
-| `@reviewer generate tests` | PRのユニットテストを生成     |
-| `@reviewer help`           | このヘルプを表示             |
+| コマンド | 説明 |
+| -------- | ---- |
+| ``fix`` | 影響を受けるファイルの修正を生成 |
+| ``help`` | このヘルプを表示 |
 
 ### 使い方
 
-**Fix & Explain:** レビューコメントに直接返信
-
-```
-@reviewer fix this
-```
-
-**Generate Tests:** PR内のどこでもコメント
-
-```
-@reviewer generate tests
-@reviewer generate tests for auth.py
-```
+Breaking changeコメントに``fix``で返信。
+ボットがrecommendationを解析し、修正を生成します。
 """,
         # Error responses
         "error_no_parent_comment": """\
