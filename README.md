@@ -21,7 +21,6 @@
 | 🗄️ **Database Storage** | PostgreSQL storage for reviews, breaking changes, and affected callers |
 | 🌐 **Multi-language Output** | Support for English, Vietnamese, Japanese, Chinese review output |
 | ⚙️ **Per-repo Configuration** | Configurable include/exclude patterns, auto-review, output language per repository |
-| 💬 **Chat Commands** | Interactive commands: `@reviewer explain`, `@reviewer fix`, `@reviewer tests` |
 | 📊 **Observability** | Structured logging with Sentry integration |
 
 ---
@@ -386,30 +385,6 @@ Each repository can have its own configuration stored in the database:
 | `slack_notify_on` | `critical` | When to notify: `all`, `critical`, `none` |
 
 ---
-
-## 💬 Chat Commands
-
-Interact with the reviewer by commenting on PRs:
-
-| Command | Description |
-|---------|-------------|
-| `@reviewer explain` | Explain the breaking change in detail |
-| `@reviewer fix` | Suggest code fix for the issue |
-| `@reviewer tests` | Generate test cases for the change |
-| `@reviewer help` | Show available commands |
-
-### Examples
-
-```
-@reviewer explain
-# Explains why the detected change is problematic
-
-@reviewer fix
-# Suggests a code fix for the breaking change
-
-@reviewer tests
-# Generates unit tests for the changed code
-```
 
 ---
 
