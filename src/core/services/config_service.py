@@ -92,18 +92,10 @@ class ConfigService:
                 session.add(config)
                 await session.flush()
                 log.info("config.created", owner=owner, repo=repo)
-
             return config
 
 
-# Singleton instance
-_config_service: ConfigService | None = None
-
-
 async def get_config_service() -> ConfigService:
-    """Get or create config service singleton."""
-    global _config_service
-    if _config_service is None:
-        redis = await get_redis()
-        _config_service = ConfigService(redis)
-    return _config_service
+    """Create a fresh config service (no singleton to avoid event loop issues)."""
+    redis = await get_redis()
+    return ConfigService(redis)

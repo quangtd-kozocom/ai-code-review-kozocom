@@ -133,21 +133,40 @@ async def _notify_slack(ctx, breaking: list[BreakingChange], comments: list[Revi
 
 
 def _build_summary(ctx, breaking: list[BreakingChange]) -> str:
-    """Build summary message."""
+    """Build summary message for Slack notification."""
     if not breaking:
-        return f"✅ No breaking changes detected in PR #{ctx.pr_number}"
+        return ":white_check_mark: *Review Passed:* No breaking changes detected."
 
     critical = sum(1 for b in breaking if b.severity == SEVERITY_CRITICAL)
-    affected = {c.file_path for b in breaking for c in b.affected_callers}
+    warning = len(breaking) - critical
+    affected_files = {c.file_path for b in breaking for c in b.affected_callers}
 
-    return "\n".join([
-        f"🔍 **Code Review Summary for PR #{ctx.pr_number}**",
+    # Stats line with spacing
+    stats_parts = []
+    if critical > 0:
+        stats_parts.append(f":red_circle: *{critical}* Critical")
+    if warning > 0:
+        stats_parts.append(f":warning: *{warning}* Warnings")
+    stats_parts.append(f":file_folder: *{len(affected_files)}* Affected Files")
+    
+    stats_line = "  |  ".join(stats_parts)
+
+    # Top Issues with detailed blockquotes
+    issues_list = []
+    for b in breaking[:3]:
+        icon = ":no_entry:" if b.severity == SEVERITY_CRITICAL else ":warning:"
+        # Format: Icon & Name \n > Detail
+        item = f"*{icon} {b.entity_name}*\n> {b.change_detail}"
+        issues_list.append(item)
+
+    parts = [
+        stats_line,
         "",
-        f"- 🚨 Critical: {critical}",
-        f"- ⚠️ Warning: {len(breaking) - critical}",
-        f"- 📁 Affected files: {len(affected)}",
-        "",
-        "**Top Issues:**",
-        *[f"- `{b.entity_name}`: {b.change_detail}" for b in breaking[:3]],
-        *([] if len(breaking) <= 3 else [f"- ... and {len(breaking) - 3} more"]),
-    ])
+        "*Top Issues Identified:*",
+        *issues_list
+    ]
+
+    if len(breaking) > 3:
+        parts.append(f"\n_:information_source: And {len(breaking) - 3} more issues..._")
+
+    return "\n".join(parts)

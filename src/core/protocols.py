@@ -8,7 +8,6 @@ Python 3.14+ compatible using modern type syntax.
 
 from typing import Protocol, runtime_checkable
 
-
 # =============================================================================
 # GitHub Service Protocol
 # =============================================================================
@@ -26,8 +25,10 @@ class GitHubClientProtocol(Protocol):
         """Fetch PR details."""
         ...
 
-    async def get_file_raw(self, owner: str, repo: str, path: str, ref: str = "HEAD") -> str | None:
-        """Get raw file content."""
+    async def get_file_raw(
+        self, owner: str, repo: str, path: str, ref: str = "HEAD", *, resolve_path: bool = False
+    ) -> str | None:
+        """Get raw file content. Set resolve_path=True to auto-resolve partial filenames."""
         ...
 
     async def create_review(

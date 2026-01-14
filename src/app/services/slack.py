@@ -130,24 +130,38 @@ class SlackService:
         if not self.client:
             return {"status": "skipped", "reason": "Slack not configured"}
 
-        emoji = "🔴" if breaking_count > 0 else "✅"
-        status_text = f"{breaking_count} breaking changes" if breaking_count else "No breaking changes"
+        # Determine status styling
+        if breaking_count > 0:
+            status_emoji = ":red_circle:"
+            status_label = "Breaking Changes Found"
+        else:
+            status_emoji = ":white_check_mark:"
+            status_label = "Review Passed"
 
         blocks: list[dict] = [
             {
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"{emoji} Code Review Complete",
+                    "text": f"{status_emoji} AI Code Review Complete",
+                    "emoji": True,
                 },
             },
+            {"type": "divider"},
             {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*PR:* {pr_title}"},
-                    {"type": "mrkdwn", "text": f"*Author:* {author}"},
-                ],
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*<{pr_url}|{pr_title}>*\n:bust_in_silhouette: *Author:* {author}",
+                },
+                "accessory": {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🔗 View PR", "emoji": True},
+                    "url": pr_url,
+                    "style": "primary",
+                },
             },
+            {"type": "divider"},
             {
                 "type": "section",
                 "text": {
@@ -155,24 +169,13 @@ class SlackService:
                     "text": summary[:SLACK_MESSAGE_CHAR_LIMIT],
                 },
             },
+            {"type": "divider"},
             {
                 "type": "context",
                 "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"📊 {status_text} | 💬 {comment_count} comments",
-                    }
-                ],
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "View PR"},
-                        "url": pr_url,
-                        "style": "primary",
-                    }
+                    {"type": "mrkdwn", "text": f"{status_emoji} *Status:* {status_label}"},
+                    {"type": "mrkdwn", "text": f":speech_balloon: *{comment_count}* Comments"},
+                    {"type": "mrkdwn", "text": ":robot_face: _AI Code Reviewer_"},
                 ],
             },
         ]

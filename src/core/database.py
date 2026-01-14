@@ -116,6 +116,27 @@ async def close_db() -> None:
         log.info("Database engine closed")
 
 
+def reset_db() -> None:
+    """
+    Reset database engine synchronously (for Celery worker context).
+
+    Called after asyncio.run() completes to prevent "attached to different loop" errors.
+    The engine will be recreated lazily on next use with the new event loop.
+    """
+    global _engine, _session_factory
+
+    if _engine:
+        # Use sync dispose - connections will be terminated
+        # This is safe because we're between asyncio.run() calls
+        try:
+            _engine.sync_engine.dispose()
+        except Exception:
+            pass  # Ignore errors during cleanup
+        _engine = None
+        _session_factory = None
+        log.debug("Database engine reset for new event loop")
+
+
 def is_db_configured() -> bool:
     """Check if database is configured."""
     settings = get_settings()
